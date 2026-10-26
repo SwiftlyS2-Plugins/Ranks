@@ -47,10 +47,19 @@ internal sealed class PlayerRegistry
     /// <remarks>
     /// Clears the slot only. The record stays resident until it is fully saved, so a disconnect
     /// cannot lose a session's points and a fast reconnect re-adopts it.
+    /// <para>
+    /// The display overlay is dropped here precisely because the record survives: re-adopting it
+    /// would otherwise hand the next session a prestige deduction nothing has recomputed, and an
+    /// unloaded module would leave every player permanently overlaid (FR-API-07).
+    /// </para>
     /// </remarks>
     public void ReleaseSlot(int slot)
     {
-        if ((uint)slot < MaxSlots) _slots[slot] = null;
+        if ((uint)slot >= MaxSlots) return;
+
+        if (_slots[slot] is { } record) record.DisplayOverride = null;
+
+        _slots[slot] = null;
     }
 
     /// <summary>Drops a fully-saved record that no longer occupies a slot.</summary>

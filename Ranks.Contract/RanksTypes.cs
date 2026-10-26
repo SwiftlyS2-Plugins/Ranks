@@ -100,3 +100,33 @@ public sealed record RanksPointSettings(
     int StartPoints,
     int MinPoints,
     IReadOnlyDictionary<string, int> EventValues);
+
+/// <summary>What the scoreboard should show for one player, instead of their stored standing.</summary>
+/// <remarks>
+/// Every field is optional and independently overridable; a null field keeps core's own answer.
+/// This is the mechanism a prestige-style module uses: deduct from <see cref="Points"/> and the
+/// tier, icon and tag all follow, because core resolves them from the displayed value rather than
+/// the stored one. Nothing here is written to the database (FR-API-07).
+/// </remarks>
+/// <param name="Points">Points to display and to resolve the ladder tier from.</param>
+/// <param name="RankMode">One of <see cref="RanksDisplayModes"/>; unparseable values are ignored.</param>
+/// <param name="TagPrefix">Prepended to the tier's clan tag, so core still owns the field.</param>
+public sealed record RanksDisplayOverride(
+    int? Points = null,
+    string? RankMode = null,
+    string? TagPrefix = null);
+
+/// <summary>Values accepted by <see cref="RanksDisplayOverride.RankMode"/>.</summary>
+/// <remarks>
+/// Strings rather than an enum because the enum lives in core's own assembly, which a module does
+/// not reference. Core parses these by name, so they must match <c>RankDisplayMode</c> exactly.
+/// </remarks>
+public static class RanksDisplayModes
+{
+    public const string Off = "Off";
+    public const string Premier = "Premier";
+    public const string Competitive = "Competitive";
+    public const string Wingman = "Wingman";
+    public const string DangerZone = "DangerZone";
+    public const string Custom = "Custom";
+}

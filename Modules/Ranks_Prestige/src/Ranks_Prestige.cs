@@ -1,0 +1,109 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
+using Ranks.Prestige.Api;
+using Ranks.Prestige.Commands;
+using Ranks.Prestige.Config;
+using Ranks.Prestige.Prestiging;
+using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Plugins;
+
+namespace Ranks.Prestige;
+
+[PluginMetadata(
+    Id = "Ranks_Prestige",
+    Version = "1.0.0",
+    Name = "Ranks Prestige",
+    Author = "Shmitzas",
+    Description = "Virtual point deduction and prestige levels for the Ranks plugin.")]
+public sealed class RanksPrestige : BasePlugin
+{
+    private ILogger _logger = null!;
+    private IDisposable? _reload;
+    private PrestigeConfig _config = null!;
+    private CommandsConfig _commandsConfig = null!;
+    private PrestigeCommands _commands = null!;
+    private RanksBridge _bridge = null!;
+
+    public RanksPrestige(ISwiftlyCore core) : base(core)
+    {
+    }
+
+    public override void Load(bool hotReload)
+    {
+        _logger = Core.LoggerFactory.CreateLogger("Ranks_Prestige");
+
+        PrestigeSelfCheck.Run();
+        LoadConfiguration();
+
+        var ladder = PrestigeLadder.Build(_config, _logger);
+
+        _bridge = new RanksBridge(Core, ladder, _config, _logger);
+        _commands = new PrestigeCommands(Core, _bridge, _config, _logger);
+
+        _commands.RegisterAll(_commandsConfig);
+    }
+
+    /// <remarks>
+    /// Acquired here rather than in Load: the shared interface does not exist yet in Load.
+    /// </remarks>
+    public override void UseSharedInterface(IInterfaceManager interfaceManager) => Acquire(interfaceManager);
+
+    public override void OnSharedInterfaceInjected(IInterfaceManager interfaceManager) => Acquire(interfaceManager);
+
+    public override void Unload()
+    {
+        _commands?.UnregisterAll();
+
+        // Before the reload token: Unwire clears every live overlay, and a reload firing midway
+        // would hand the bridge a ladder it is in the middle of tearing down.
+        _bridge?.Unwire();
+        _reload?.Dispose();
+    }
+
+    private void Acquire(IInterfaceManager interfaceManager)
+    {
+        if (_bridge.TryAcquire(interfaceManager)) return;
+
+        _logger.LogWarning(
+            "Ranks_Prestige: the Ranks plugin is not present, so this module is idle. " +
+            "No prestige levels are being applied.");
+    }
+
+    /// <remarks>
+    /// Bound off <c>Core.Configuration.Manager</c>, the root the framework already owns and
+    /// watches — no ServiceCollection and no IOptionsMonitor needed to get a live reload.
+    /// </remarks>
+    private void LoadConfiguration()
+    {
+        Core.Configuration
+            // addMissingKeys: a plugin upgrade inserts new keys into an existing file with their
+            // defaults, leaving the operator's values and formatting alone.
+            .InitializeJsonWithModel<PrestigeConfig>("config.jsonc", "Prestige", true)
+            .InitializeJsonWithModel<CommandsConfig>("commands.jsonc", "Commands", true)
+            // The full path matters: AddJsonFile resolves relative to the process working
+            // directory, not the plugin folder.
+            .Configure(builder =>
+            {
+                builder.AddJsonFile(Core.Configuration.GetConfigPath("config.jsonc"), optional: false, reloadOnChange: true);
+                builder.AddJsonFile(Core.Configuration.GetConfigPath("commands.jsonc"), optional: false, reloadOnChange: true);
+            });
+
+        _config = BindConfig();
+        _commandsConfig = Core.Configuration.Manager.GetSection("Commands").Get<CommandsConfig>() ?? new CommandsConfig();
+
+        // Levels are re-read on every reload and re-applied to everyone present. Command names are
+        // not: renaming one needs the old registration dropped, so it stays restart-only.
+        _reload = ChangeToken.OnChange(Core.Configuration.Manager.GetReloadToken, () =>
+        {
+            var incoming = BindConfig();
+
+            _config = incoming;
+            _commands?.UpdateConfig(incoming);
+            _bridge?.UpdateLadder(PrestigeLadder.Build(incoming, _logger), incoming);
+        });
+    }
+
+    private PrestigeConfig BindConfig() =>
+        Core.Configuration.Manager.GetSection("Prestige").Get<PrestigeConfig>() ?? new PrestigeConfig();
+}

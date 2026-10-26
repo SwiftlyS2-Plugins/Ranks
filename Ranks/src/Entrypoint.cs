@@ -127,6 +127,7 @@ public sealed partial class Ranks : BasePlugin
     {
         TableNamesSelfCheck.Run();
         ScoringSelfCheck.Run();
+        ScoreboardSelfCheck.Run();
 
         _tables = new TableNames(_config.Current.Database);
         _database = DatabaseConnection.Resolve(Core, _config.Current.Database.Connection, _logger);

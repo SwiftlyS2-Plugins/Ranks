@@ -266,23 +266,23 @@ internal sealed class RanksApi : IRanksApi
 
     public void RegisterMigrations(Assembly assembly, string pluginId) => _migrator.Register(assembly, pluginId);
 
-    public void SetScoreboardOverride(IPlayer player, int displayPoints)
+    public void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay)
     {
         if (_registry.BySlot(player.Slot) is not { } record) return;
 
-        record.ScoreboardOverride = displayPoints;
+        record.DisplayOverride = overlay;
         _scoreboard.Apply(player);
     }
 
-    public void ClearScoreboardOverride(IPlayer player)
+    public void ClearDisplayOverride(IPlayer player)
     {
         if (_registry.BySlot(player.Slot) is not { } record) return;
 
-        record.ScoreboardOverride = null;
+        record.DisplayOverride = null;
         _scoreboard.Apply(player);
     }
 
-    public int? GetScoreboardOverride(IPlayer player) => _registry.BySlot(player.Slot)?.ScoreboardOverride;
+    public RanksDisplayOverride? GetDisplayOverride(IPlayer player) => _registry.BySlot(player.Slot)?.DisplayOverride;
 
     public Task<bool> SavePlayerAsync(ulong steamId) => _sessions.SavePlayerAsync(steamId);
 

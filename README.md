@@ -16,7 +16,7 @@
 
 - 🏆 **Points and ranks** - a configurable ladder, priced per event, with VIP and dynamic multipliers
 - 📊 **Gameplay stats** - kills, deaths, assists, round and match results, bomb plants and defuses
-- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, Danger Zone or Custom ranks, plus ranks clan tags
+- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, Danger Zone, or a Custom mode for replacement icon sets, plus rank clan tags
 - 🗄️ **MySQL, PostgreSQL or SQLite** - one connection, shared with every module
 - 🧩 **Module API** - other plugins read ranks, react to changes, and own tables core migrates for them
 - 🔁 **Live config reload** - all configuration changes apply on save
@@ -124,10 +124,13 @@ Prefix and suffix are normalised to one underscore, so `awp`, `awp_` and `_awp` 
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `Scoreboard.RankMode` | string | `"Premier"` | `Off`, `Premier`, `Competitive`, `Wingman` or `DangerZone` |
+| `Scoreboard.RankMode` | string | `"Premier"` | `Off`, `Premier`, `Competitive`, `Wingman`, `DangerZone` or `Custom` |
 | `Scoreboard.ScoreSync` | bool | `false` | Write points into the scoreboard score column |
 | `Scoreboard.Clantags` | bool | `true` | Show the rank tag as a clan tag |
-| `Scoreboard.SkillGroupOffset` | int | `0` | Shifts the icon; **Competitive mode only** |
+| `Scoreboard.SkillGroupOffset` | int | `0` | Shifts the icon; **Competitive, Wingman and Danger Zone only** |
+| `Scoreboard.CustomRankBase` | int | `0` | First icon index of a replacement set; **Custom mode only** |
+| `Scoreboard.CustomRankMax` | int | `18` | Ladder position past which everyone shares the top icon; **Custom mode only** |
+| `Scoreboard.CustomRankMargin` | int | `0` | Ladder positions skipped before the first icon; **Custom mode only** |
 
 `Premier` renders the point total itself as a CS Rating, coloured by CS2's own bands — which is
 why the shipped seven-band ladder is legible without mapping anything. `Competitive` renders an
@@ -210,6 +213,7 @@ commands. At most one absolute module may run at a time; core does not police th
 | [Ranks_WeaponStats](Modules/Ranks_WeaponStats) | data | Per-weapon and per-hitbox statistics, with `!weaponstats` |
 | [Ranks_EloPoints](Modules/Ranks_EloPoints) | absolute | Faceit-style Elo rating in place of per-kill scoring |
 | [Ranks_CustomCombos](Modules/Ranks_CustomCombos) | additive | Operator-defined kill combinations, with `!combos` |
+| [Ranks_Prestige](Modules/Ranks_Prestige) | display | Prestige levels as a virtual point deduction, with `!prestige` |
 
 Modules that publish a read API of their own ship their own contract assembly, from their own
 directory — adding one never touches core.

@@ -76,8 +76,8 @@ public sealed class RankOptions
 /// <summary>How the scoreboard renders a player's rank.</summary>
 /// <remarks>
 /// Plugin-level values, not engine ones. <c>m_iCompetitiveRankType</c> takes a different
-/// set and these must be translated to it — a wrong engine value renders nothing at all,
-/// with no error (FR-SCB-03).
+/// set and these are translated to it by <c>ScoreboardService.EngineRankType</c> — a wrong
+/// engine value renders nothing at all, with no error (FR-SCB-03).
 /// </remarks>
 public enum RankDisplayMode
 {
@@ -86,6 +86,13 @@ public enum RankDisplayMode
     Competitive = 2,
     Wingman = 3,
     DangerZone = 4,
+
+    /// <remarks>
+    /// Competitive's icon slots driven by ladder position through <c>Scoreboard.CustomRank*</c>,
+    /// for servers shipping a replacement icon set. Matches K4-LevelRanks' mode 0 exactly so an
+    /// existing icon addon and its base/margin values port over unchanged.
+    /// </remarks>
+    Custom = 5,
 }
 
 public sealed class ScoreboardOptions
@@ -100,8 +107,17 @@ public sealed class ScoreboardOptions
 
     public bool Clantags { get; set; } = true;
 
-    /// <remarks>Only Competitive mode reads this; the other modes render natively and ignore it.</remarks>
+    /// <remarks>Read by the icon modes (Competitive, Wingman, DangerZone); Premier and Custom ignore it.</remarks>
     public int SkillGroupOffset { get; set; } = 0;
+
+    /// <remarks>First icon index of a replacement set. Custom mode only.</remarks>
+    public int CustomRankBase { get; set; } = 0;
+
+    /// <remarks>Ladder position past which every player shares the top icon. Custom mode only.</remarks>
+    public int CustomRankMax { get; set; } = 18;
+
+    /// <remarks>Ladder positions skipped before the first icon is used. Custom mode only.</remarks>
+    public int CustomRankMargin { get; set; } = 0;
 }
 
 public sealed class PointsOptions

@@ -1,3 +1,5 @@
+using Ranks.Contract;
+
 namespace Ranks.Players;
 
 /// <summary>One player's resident record. Mutated on the game thread, snapshotted for writes.</summary>
@@ -49,8 +51,8 @@ internal sealed class PlayerRecord
     /// <summary>When the last kill landed, for <c>Points.SecondsBetweenKills</c>.</summary>
     public DateTime LastKillAt { get; set; }
 
-    /// <summary>Session-only scoreboard value (FR-API-07); never persisted.</summary>
-    public int? ScoreboardOverride { get; set; }
+    /// <summary>Session-only scoreboard overlay (FR-API-07); never persisted.</summary>
+    public RanksDisplayOverride? DisplayOverride { get; set; }
 
     /// <summary>Buffered point lines awaiting the round-end summary.</summary>
     public int PendingSummaryPoints { get; set; }

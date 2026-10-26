@@ -1,0 +1,13 @@
+{
+  // Shown by !prestige. Plain text — core's chat colours are applied by the framework.
+  "command.prestige.help": "Shows your prestige level and progress",
+
+  "error.players_only": "This command can only be used in-game.",
+  "error.unavailable": "Prestige data is not available yet. Try again in a moment.",
+
+  "prestige.disabled": "Prestige is currently disabled on this server.",
+  "prestige.none": "You have not reached the first prestige yet.",
+  "prestige.current": "Prestige {0} — showing {1} points.",
+  "prestige.next": "{0} more points to the next prestige.",
+  "prestige.max": "You have reached the highest prestige."
+}

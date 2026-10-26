@@ -1,0 +1,140 @@
+# Ranks_Prestige
+
+Prestige levels for the [Ranks](../../README.md) plugin, as a virtual point deduction.
+
+---
+
+## Features
+
+- ♻️ **Virtual deduction** - the scoreboard restarts at zero each prestige; stored points keep climbing
+- 🏷️ **Prestige tag** - a prefix on core's clan tag, composed by core rather than fought over
+- 🎖️ **Per-level scoreboard mode** - a level can switch between Premier, Competitive, Wingman, Danger Zone or Custom
+- ⚡ **Follows every points change** - the display moves with the award, not on a timer
+- 🗄️ **No database, no migration** - the level is derived from points the player already has
+
+> [!NOTE]
+> **Nothing is deducted from the player's real total.** Points, stats and the database row are
+> untouched; `!rank` and `!top` keep showing the true standing. Only the scoreboard changes.
+
+---
+
+## Requirements
+
+- `Ranks` core installed and loaded
+
+No database connection of its own and no tables — the prestige level is derived from the points
+core already stores.
+
+---
+
+## Installation
+
+1. Drop the module into your plugins directory alongside `Ranks`.
+2. Start the server once. `config.jsonc` and `commands.jsonc` are created.
+3. Edit the levels to match your server's scoring pace — the shipped thresholds assume a ladder
+   where 40 000 points is a long grind.
+
+---
+
+## Commands
+
+### Player Commands
+
+| Command | Aliases | Permission | Description |
+|---------|---------|------------|-------------|
+| `!prestige` | `!myprestige` | None | Your prestige level and points to the next one |
+
+Name, aliases and permission are editable in `commands.jsonc`. An empty `Command` removes it.
+
+---
+
+## Configuration
+
+Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `Enabled` | bool | `true` | Turns the module off without uninstalling it; clears every overlay |
+| `TagPrefix` | string | `"[P{0}] "` | Prepended to core's clan tag, `{0}` being the level. Empty writes no prefix |
+| `Levels` | array | 5 levels | The prestige steps |
+| `Levels[].Level` | int | — | The number shown to the player. Must be above zero |
+| `Levels[].MinimumPoints` | int | — | Stored points this level opens at, **and** the amount deducted |
+| `Levels[].RankMode` | string | `""` | `Premier`, `Competitive`, `Wingman`, `DangerZone` or `Custom`. Empty keeps core's mode |
+| `DetailedLogging` | bool | `false` | Narrates expected flow; warnings and errors print regardless |
+
+### Example Configuration
+
+```jsonc
+{
+  "Prestige": {
+    "Enabled": true,
+    "TagPrefix": "[P{0}] ",
+    "Levels": [
+      { "Level": 1, "MinimumPoints": 40000, "RankMode": "" },
+      { "Level": 2, "MinimumPoints": 80000, "RankMode": "Competitive" },
+      { "Level": 3, "MinimumPoints": 120000, "RankMode": "Wingman" }
+    ],
+    "DetailedLogging": false
+  }
+}
+```
+
+### `MinimumPoints` is both the threshold and the deduction
+
+That is what makes the visible ladder restart. A player on 85 000 points with the example above is
+prestige 2, and the scoreboard shows `85 000 − 80 000 = 5 000` — back at the bottom of core's
+ladder, with the icon and clan tag to match.
+
+Set the thresholds evenly if you want each prestige to cost the same; the module does not require
+it, and uneven steps work.
+
+> [!WARNING]
+> **Lowering a threshold promotes players instantly and resets their visible rank**, because the
+> level is derived from current points rather than stored on redemption. Raising one demotes them
+> the same way. Change thresholds on a live server deliberately.
+
+---
+
+## How It Works
+
+**Overview**
+
+The module never draws anything. It tells core what to display, and core draws it.
+
+**Resolving**
+
+On player load and after every points change, the module asks core for the player's stored total,
+finds the highest level whose `MinimumPoints` it reaches, and subtracts that threshold.
+
+**Displaying**
+
+The result goes to core as a display overlay — displayed points, an optional scoreboard mode, and
+the tag prefix. Core resolves the ladder tier from the **displayed** total, so the number, the rank
+icon and the clan tag all move together. Core also skips the write when nothing changed, so a kill
+that does not move a player between levels costs a comparison.
+
+**Prestige Flow**
+
+```
+Points change → resolve level → displayed = points − threshold → core draws tier, icon, tag
+```
+
+**Key Mechanics**
+
+- The level is **derived, never stored** — there is nothing to migrate and nothing to get out of sync.
+- Below the first threshold the overlay is cleared, so an unpromoted player is drawn exactly as core would.
+- Overlays are session-scoped: they vanish on disconnect and on unload.
+- Config reloads re-resolve everyone present immediately.
+
+---
+
+## Troubleshooting
+
+| Problem | Possible Cause | Solution |
+|---------|----------------|----------|
+| "this module is idle" at startup | Ranks is not installed | Install Ranks alongside it |
+| Nobody reaches a prestige | Thresholds far above your scoring pace | Lower `MinimumPoints`, or check `!rank` for real totals |
+| The tag shows `[P{0}]` literally | `TagPrefix` lost its `{0}` placeholder | Restore `{0}`, which is replaced by the level |
+| No tag prefix appears | Core's `Scoreboard.Clantags` is `false` | Core owns the tag; enable it there |
+| The scoreboard mode never changes | `Levels[].RankMode` is empty or misspelled | Use an exact name; an unknown one falls back to core's mode |
+| A level was dropped at startup | Two levels share a `MinimumPoints`, or a value is at or below zero | The log names the reason; thresholds must be unique and positive |

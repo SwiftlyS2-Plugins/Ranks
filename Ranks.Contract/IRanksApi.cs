@@ -106,11 +106,23 @@ public interface IRanksApi
     /// </remarks>
     void RegisterMigrations(Assembly assembly, string pluginId);
 
-    // ---- FR-API-07 scoreboard override ---------------------------------------
+    // ---- FR-API-07 scoreboard display overlay --------------------------------
 
-    void SetScoreboardOverride(IPlayer player, int displayPoints);
-    void ClearScoreboardOverride(IPlayer player);
-    int? GetScoreboardOverride(IPlayer player);
+    /// <summary>Overlays what the scoreboard shows for one player, leaving stored points alone.</summary>
+    /// <remarks>
+    /// Applies immediately. Every display surface core owns — the rank icon, the mode it is drawn
+    /// in, the clan tag and the synced score — is resolved from the overlay, so a module never has
+    /// to write those fields itself and never fights core for the tag (FR-API-02).
+    /// <para>
+    /// Session-scoped: dropped when the player disconnects, never persisted. A module that wants it
+    /// to survive a reconnect re-applies it from <c>PlayerDataLoaded</c>.
+    /// </para>
+    /// </remarks>
+    void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay);
+
+    void ClearDisplayOverride(IPlayer player);
+
+    RanksDisplayOverride? GetDisplayOverride(IPlayer player);
 
     // ---- FR-API-09 explicit persistence --------------------------------------
 

@@ -1024,37 +1024,50 @@ redraw.
 Driven by two `CCSPlayerController` fields: `CompetitiveRankType` (`byte`)
 selects the display mode and `CompetitiveRanking` (`int`) carries the value.
 
-`Scoreboard.RankMode` maps onto `CompetitiveRankType`:
+`Scoreboard.RankMode` is a plugin-level enum **translated** to `CompetitiveRankType`
+by `ScoreboardService.EngineRankType`. The engine's set is not `0`–`4`:
 
-| Value | Mode | Icon source |
-|---|---|---|
-| `0` | Off | No icon |
-| `1` | **Premier** *(default)* | The player's points, rendered as a CS Rating |
-| `2` | Competitive | Skill-group index from the ladder (below) |
-| `3` | Wingman | Native |
-| `4` | Danger Zone | Native |
+| `RankMode` | Engine type | Icon source | Ceiling |
+|---|---|---|---|
+| `Off` | — | Nothing written | — |
+| `Premier` *(default)* | `11` | The player's points, rendered as a CS Rating | — |
+| `Competitive` | `12` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 18 |
+| `Wingman` | `7` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 18 |
+| `DangerZone` | `10` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 15 |
+| `Custom` | `12` | Ladder **position** through `Scoreboard.CustomRank*` | `CustomRankMax` |
+
+> [!WARNING]
+> **Writing the plugin enum straight through is a silent total failure**, and it shipped
+> that way: `CompetitiveRankType = (byte)mode` sent `1` for Premier, which CS2 does not
+> recognise, so the default configuration rendered no icon at all and reported no error.
+> Any mode added here needs its engine value confirmed on a live server — these are the
+> values K4-LevelRanks ships and runs in production, not values inferred from the enum.
+
+`Custom` reproduces K4-LevelRanks' mode 0 exactly, so a server already running one of
+its replacement icon addons keeps its `CustomRankBase` / `CustomRankMax` /
+`CustomRankMargin` values unchanged:
+
+```
+icon = max(0, position > CustomRankMax
+                ? CustomRankBase + CustomRankMax - CustomRankMargin
+                : CustomRankBase + (position - CustomRankMargin - 1))
+```
+
+It is position-based rather than per-tier because that is what those addons are indexed
+against. The other icon modes stay per-tier, so several tiers may deliberately share an
+icon and a ladder need not be 18 entries long.
 
 **Premier is the default**, and it is what makes the seven-band ladder in
 FR-RNK-01 legible: CS2 renders `CompetitiveRanking` as the number itself and
 colours it by its own band, so the player sees continuous movement every round
 rather than an icon that changes twice a season. Nothing needs to map.
 
-> [!WARNING]
-> **The `RankMode` → `m_iCompetitiveRankType` numeric mapping above is
-> unverified.** `m_iCompetitiveRankType` is a networked `signed char` on
-> `CCSPlayerController` (confirmed in the current schema dump), but the engine
-> values its modes take are *not* `0`–`4`, and the table is a plugin-level enum
-> that must be translated. Confirm each value on a live server before relying on
-> it: a wrong rank type renders nothing at all, with no error anywhere, which
-> looks exactly like a failed points calculation.
+**Premier ignores `SkillGroup` and the offset entirely** — it renders the point total
+itself, so there is nothing to map. **`Custom` ignores them too**, deriving its icon from
+ladder position instead. Ladder entries still carry a `SkillGroup` in every mode so that
+switching `RankMode` works without re-authoring the file.
 
-**The custom skill-group mapping applies to Competitive mode only.** Premier,
-Wingman and Danger Zone render their own native representation and must ignore
-`SkillGroup` and the offset entirely — attempting to force a custom icon in
-those modes does nothing. Ladder entries still carry a `SkillGroup` so that
-switching `RankMode` to Competitive works without re-authoring the file.
-
-In Competitive mode:
+In the per-tier icon modes (Competitive, Wingman, Danger Zone):
 
 - Each ladder entry carries a `SkillGroup` index, so an 18-rank ladder need not
   map 1:1 onto the 18 CS2 skill groups — several ranks may share an icon.
@@ -1062,7 +1075,8 @@ In Competitive mode:
   exists for servers shipping a replacement skill-group image set whose icons
   start at a different base index.
 - The resolved index is clamped to the engine's valid range after the offset is
-  applied.
+  applied — 18 for Competitive and Wingman, **15 for Danger Zone**, which has
+  fewer icons.
 - **Every networked field write must be followed by its `*Updated()` notifier** —
   `CompetitiveRankingUpdated()` and `CompetitiveRankTypeUpdated()` here,
   `ScoreUpdated()` for FR-SCB-02, `ClanUpdated()` for FR-SCB-01. Without it the
@@ -1725,17 +1739,40 @@ shared ledger was rejected, and why ownership sits with core.
 migration classes, so core still names no module type and the dependency rule
 holds.
 
-### FR-API-07 — Scoreboard override
+### FR-API-07 — Scoreboard display overlay
 
 ```csharp
-void SetScoreboardOverride(IPlayer player, int displayPoints);
-void ClearScoreboardOverride(IPlayer player);
-int? GetScoreboardOverride(IPlayer player);
+void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay);
+void ClearDisplayOverride(IPlayer player);
+RanksDisplayOverride? GetDisplayOverride(IPlayer player);
+
+public sealed record RanksDisplayOverride(
+    int? Points = null,      // display total, and the tier/icon are resolved from it
+    string? RankMode = null, // one of RanksDisplayModes; unparseable values are ignored
+    string? TagPrefix = null // prepended to the tier's clan tag
+);
 ```
 
 Session-only, never persisted, cleared on disconnect. The player's real points,
-stats and database row are untouched. Supports event/seasonal plugins that want
-to display a different ladder.
+stats and database row are untouched. Supports prestige and event/seasonal
+plugins that want to display a different ladder.
+
+**Every display surface core owns resolves from the overlay** — the clan tag, the
+rank icon, the mode it is drawn in, and the synced score. This is the whole
+requirement: a points-only override that left the tier, tag and icon on the stored
+total is the shape that does not work, because a prestige deduction then shows a
+reset number beside an unchanged top-tier icon and tag.
+
+> [!NOTE]
+> A module must never write `Clan`, `CompetitiveRankType` or `CompetitiveRanking`
+> itself. Core rewrites all three on every apply, so a module doing its own write
+> ends up re-applying on a timer and flickering against core — which is exactly
+> what `TagPrefix` exists to remove (FR-API-02).
+
+`ClearDisplayOverride` is the module's responsibility on unload: core clears the
+overlay when the session ends, but a record survives a disconnect for the save
+pass, and an unloaded module would otherwise leave every connected player
+overlaid with nothing left running to explain it.
 
 ### FR-API-08 — Consumer contract
 

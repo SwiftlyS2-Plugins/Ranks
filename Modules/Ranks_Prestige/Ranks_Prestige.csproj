@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Ranks_Prestige</AssemblyName>
+    <RootNamespace>Ranks.Prestige</RootNamespace>
+    <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
+    <PublishDir>$(OutputPath)publish/Ranks_Prestige</PublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="SwiftlyS2.CS2" Version="*-*" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=false is load-bearing, not tidiness: copying Ranks.Contract.dll next to this
+         plugin makes the host load a SECOND one, giving IRanksApi two Type identities, and
+         TryGetSharedInterface silently stops matching on a server where Ranks is plainly running
+         (FR-API-00). -->
+    <ProjectReference Include="../../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="resources/translations/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <UsingTask TaskName="ExtractPluginVersion"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <FilePath ParameterType="System.String" Required="true" />
+      <PluginVersion ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+          var content = System.IO.File.ReadAllText(FilePath);
+          var m = System.Text.RegularExpressions.Regex.Match(content, "Version\\s*=\\s*\"([^\"]+)\"");
+          PluginVersion = m.Success ? m.Groups[1].Value : "";
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="CreateZip" AfterTargets="Publish">
+    <ExtractPluginVersion FilePath="$(MSBuildThisFileDirectory)src\Ranks_Prestige.cs">
+      <Output TaskParameter="PluginVersion" PropertyName="_PluginVersion" />
+    </ExtractPluginVersion>
+    <Error Condition="'$(_PluginVersion)' == ''"
+           Text="CreateZip: failed to extract PluginMetadata.Version from src\Ranks_Prestige.cs." />
+
+    <ZipDirectory SourceDirectory="$(PublishDir)../" DestinationFile="$(OutputPath)../$(AssemblyName)-v$(_PluginVersion).zip" Overwrite="true" />
+  </Target>
+
+</Project>

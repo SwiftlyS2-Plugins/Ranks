@@ -14,6 +14,7 @@ on:
           - Ranks_WeaponStats
           - Ranks_EloPoints
           - Ranks_CustomCombos
+          - Ranks_Prestige
 
 concurrency:
   group: release
@@ -51,7 +52,7 @@ jobs:
               echo "tagprefix=v"                        >> "$GITHUB_OUTPUT"
               echo "bundles_modules=true"               >> "$GITHUB_OUTPUT"
               ;;
-            Ranks_WeaponStats|Ranks_EloPoints|Ranks_CustomCombos)
+            Ranks_WeaponStats|Ranks_EloPoints|Ranks_CustomCombos|Ranks_Prestige)
               echo "name=$TARGET"                              >> "$GITHUB_OUTPUT"
               echo "project=Modules/$TARGET/$TARGET.csproj"    >> "$GITHUB_OUTPUT"
               echo "entrypoint=Modules/$TARGET/src/$TARGET.cs" >> "$GITHUB_OUTPUT"
@@ -176,7 +177,7 @@ jobs:
           # A core release ships the modules built from the same commit, so an operator never
           # has to work out which module zip goes with which core version.
           if [ "${{ steps.target.outputs.bundles_modules }}" = "true" ]; then
-            for MODULE in Ranks_WeaponStats Ranks_EloPoints Ranks_CustomCombos; do
+            for MODULE in Ranks_WeaponStats Ranks_EloPoints Ranks_CustomCombos Ranks_Prestige; do
               dotnet restore "Modules/$MODULE/$MODULE.csproj"
               dotnet publish "Modules/$MODULE/$MODULE.csproj" -c Release
             done
@@ -203,7 +204,7 @@ jobs:
           cp "$PLUGIN_ZIP" release-artifacts/
 
           if [ "${{ steps.target.outputs.bundles_modules }}" = "true" ]; then
-            for MODULE in Ranks_WeaponStats Ranks_EloPoints Ranks_CustomCombos; do
+            for MODULE in Ranks_WeaponStats Ranks_EloPoints Ranks_CustomCombos Ranks_Prestige; do
               # Globbed rather than composed from a version: a module carries its own, and a core
               # release attaches whatever that is at this commit.
               MODULE_ZIP=$(find "Modules/$MODULE/build" -maxdepth 1 -name "${MODULE}-v*.zip" -type f | head -1)
@@ -243,3 +244,4 @@ jobs:
             release-artifacts/*.zip
 
           echo "Released $TAG"
+

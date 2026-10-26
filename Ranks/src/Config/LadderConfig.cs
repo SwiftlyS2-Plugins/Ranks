@@ -108,11 +108,13 @@ internal static class LadderSeed
             // Re-tuning demotes players who have not lost a single point, so it is a deliberate decision
             // rather than routine maintenance.
             //
-            // SkillGroup is read ONLY when Scoreboard.RankMode is Competitive. In Premier (the default)
-            // CS2 renders the point total itself and colours it by its own band, which is what makes seven
-            // coarse bands legible - the colour is the tier, the number is the progress bar. Switching to
-            // Competitive without also switching to a finer-grained ladder removes the number and leaves
-            // seven icons; resources/examples ships an 18-entry ladder for that case.
+              // SkillGroup is read by the per-tier icon modes - Competitive, Wingman and Danger Zone.
+              // Premier (the default) renders the point total itself and colours it by CS2's own band,
+              // which is what makes seven coarse bands legible - the colour is the tier, the number is
+              // the progress bar. Switching to Competitive without also switching to a finer-grained
+              // ladder removes the number and leaves seven icons; resources/examples ships an 18-entry
+              // ladder for that case. Custom mode ignores SkillGroup and maps ladder POSITION onto a
+              // replacement icon set through Scoreboard.CustomRankBase/Max/Margin instead.
             {
               "Ladder": {
                 "Tiers": [
