@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "What to release"
+        type: choice
+        default: core
+        options:
+          - core
+          - Ranks_WeaponStats
+          - Ranks_EloPoints
+          - Ranks_CustomCombos
 
 concurrency:
   group: release
@@ -24,21 +34,89 @@ jobs:
           # Full history so `git describe` can find the previous tag for the compare link.
           fetch-depth: 0
 
-      - name: Read version from PluginMetadata
+      # Every later step reads these, so a new module is added here and nowhere else.
+      - name: Resolve target
+        id: target
+        run: |
+          set -euo pipefail
+          TARGET="${{ github.event.inputs.target || 'core' }}"
+
+          case "$TARGET" in
+            core)
+              echo "name=Ranks"                         >> "$GITHUB_OUTPUT"
+              echo "project=Ranks/Ranks.csproj"         >> "$GITHUB_OUTPUT"
+              echo "entrypoint=Ranks/src/Entrypoint.cs" >> "$GITHUB_OUTPUT"
+              echo "changelog=CHANGELOG.md"             >> "$GITHUB_OUTPUT"
+              echo "zipdir=Ranks/build"                 >> "$GITHUB_OUTPUT"
+              echo "tagprefix=v"                        >> "$GITHUB_OUTPUT"
+              echo "bundles_modules=true"               >> "$GITHUB_OUTPUT"
+              ;;
+            Ranks_WeaponStats|Ranks_EloPoints|Ranks_CustomCombos)
+              echo "name=$TARGET"                              >> "$GITHUB_OUTPUT"
+              echo "project=Modules/$TARGET/$TARGET.csproj"    >> "$GITHUB_OUTPUT"
+              echo "entrypoint=Modules/$TARGET/src/$TARGET.cs" >> "$GITHUB_OUTPUT"
+              echo "changelog=Modules/$TARGET/CHANGELOG.md"    >> "$GITHUB_OUTPUT"
+              echo "zipdir=Modules/$TARGET/build"              >> "$GITHUB_OUTPUT"
+              echo "tagprefix=$TARGET-v"                       >> "$GITHUB_OUTPUT"
+              echo "bundles_modules=false"                     >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Unknown release target '$TARGET'."
+              exit 1
+              ;;
+          esac
+
+          echo "Releasing $TARGET"
+
+      # The CHANGELOG is the source of truth; PluginMetadata only has to agree with it.
+      - name: Read version from CHANGELOG
         id: version
         run: |
           set -euo pipefail
-          MAIN_CS="Ranks/src/Ranks.cs"
-          VERSION=$(sed -n 's/.*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$MAIN_CS" | head -1)
+          CHANGELOG="${{ steps.target.outputs.changelog }}"
+
+          if [ ! -f "$CHANGELOG" ]; then
+            echo "::error::$CHANGELOG does not exist."
+            exit 1
+          fi
+
+          # The topmost real "## [x.y.z]" heading. The template in the header comment is
+          # indented, so an anchored match skips it without needing to strip comments.
+          VERSION=$(grep -m1 -oP '^##[ \t]*\[v?\K[^]]+' "$CHANGELOG" || true)
 
           if [ -z "$VERSION" ]; then
-            echo "::error file=$MAIN_CS::Could not read PluginMetadata.Version"
+            echo "::error file=$CHANGELOG::No '## [x.y.z]' section found, so there is nothing to release."
             exit 1
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version $VERSION -> tag v$VERSION"
+          echo "tag=${{ steps.target.outputs.tagprefix }}$VERSION" >> "$GITHUB_OUTPUT"
+          echo "CHANGELOG says $VERSION"
+
+      - name: Verify PluginMetadata matches the CHANGELOG
+        run: |
+          set -euo pipefail
+          ENTRYPOINT="${{ steps.target.outputs.entrypoint }}"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if [ ! -f "$ENTRYPOINT" ]; then
+            echo "::error::$ENTRYPOINT does not exist."
+            exit 1
+          fi
+
+          DECLARED=$(sed -n 's/.*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$ENTRYPOINT" | head -1)
+
+          if [ -z "$DECLARED" ]; then
+            echo "::error file=$ENTRYPOINT::Could not read PluginMetadata.Version."
+            exit 1
+          fi
+
+          if [ "$DECLARED" != "$VERSION" ]; then
+            echo "::error file=$ENTRYPOINT::PluginMetadata.Version is $DECLARED but the newest CHANGELOG section is $VERSION. Bump whichever is behind."
+            exit 1
+          fi
+
+          echo "PluginMetadata.Version $DECLARED matches."
 
       - name: Refuse to overwrite an existing release
         env:
@@ -47,7 +125,7 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.version.outputs.tag }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release $TAG already exists. Bump PluginMetadata.Version in Ranks/src/Ranks.cs."
+            echo "::error::Release $TAG already exists. Add a new CHANGELOG section and bump PluginMetadata.Version."
             exit 1
           fi
 
@@ -55,6 +133,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
+          CHANGELOG="${{ steps.target.outputs.changelog }}"
 
           # Print the body of the matching "## [x.y.z]" section, stopping at the next one.
           awk -v ver="$VERSION" '
@@ -63,14 +142,16 @@ jobs:
               if ($0 ~ "\\[v?" ver "\\]") { found = 1; next }
             }
             found { print }
-          ' CHANGELOG.md > release-notes.md
+          ' "$CHANGELOG" > release-notes.md
 
           if [ ! -s release-notes.md ]; then
-            echo "::error file=CHANGELOG.md::No '## [$VERSION]' section found."
+            echo "::error file=$CHANGELOG::No '## [$VERSION]' section found."
             exit 1
           fi
 
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          # Matched to this plugin's own prefix: core's previous tag must not resolve to a
+          # module's, and vice versa.
+          PREV_TAG=$(git describe --tags --abbrev=0 --match "${{ steps.target.outputs.tagprefix }}*" 2>/dev/null || true)
           if [ -n "$PREV_TAG" ]; then
             printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
               "${{ github.repository }}" "$PREV_TAG" "${{ steps.version.outputs.tag }}" >> release-notes.md
@@ -88,16 +169,30 @@ jobs:
       - name: Publish
         run: |
           set -euo pipefail
-          dotnet restore Ranks/Ranks.csproj
-          dotnet publish Ranks/Ranks.csproj -c Release
 
-      - name: Collect plugin zip
+          dotnet restore "${{ steps.target.outputs.project }}"
+          dotnet publish "${{ steps.target.outputs.project }}" -c Release
+
+          # A core release ships the modules built from the same commit, so an operator never
+          # has to work out which module zip goes with which core version.
+          if [ "${{ steps.target.outputs.bundles_modules }}" = "true" ]; then
+            for MODULE in Ranks_WeaponStats Ranks_EloPoints Ranks_CustomCombos; do
+              dotnet restore "Modules/$MODULE/$MODULE.csproj"
+              dotnet publish "Modules/$MODULE/$MODULE.csproj" -c Release
+            done
+          fi
+
+      - name: Collect zips
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          # Produced by the csproj's CreateZip target, which reads the same Ranks.cs version.
-          # Lands in Ranks/build/ because OutputPath picks up the TFM, so $(OutputPath)../ is build/.
-          PLUGIN_ZIP="Ranks/build/Ranks-v${VERSION}.zip"
+          NAME="${{ steps.target.outputs.name }}"
+
+          mkdir -p release-artifacts
+
+          # Produced by each csproj's CreateZip target, which reads the same PluginMetadata the
+          # version check above already matched against the CHANGELOG.
+          PLUGIN_ZIP="${{ steps.target.outputs.zipdir }}/${NAME}-v${VERSION}.zip"
 
           if [ ! -f "$PLUGIN_ZIP" ]; then
             echo "::error::Expected $PLUGIN_ZIP from the CreateZip target. Zips found:"
@@ -105,8 +200,23 @@ jobs:
             exit 1
           fi
 
-          mkdir -p release-artifacts
           cp "$PLUGIN_ZIP" release-artifacts/
+
+          if [ "${{ steps.target.outputs.bundles_modules }}" = "true" ]; then
+            for MODULE in Ranks_WeaponStats Ranks_EloPoints Ranks_CustomCombos; do
+              # Globbed rather than composed from a version: a module carries its own, and a core
+              # release attaches whatever that is at this commit.
+              MODULE_ZIP=$(find "Modules/$MODULE/build" -maxdepth 1 -name "${MODULE}-v*.zip" -type f | head -1)
+
+              if [ -z "$MODULE_ZIP" ]; then
+                echo "::error::No zip found for $MODULE. Its CreateZip target did not run."
+                exit 1
+              fi
+
+              cp "$MODULE_ZIP" release-artifacts/
+            done
+          fi
+
           ls -l release-artifacts
 
       - name: Create release
@@ -116,16 +226,17 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
+          NAME="${{ steps.target.outputs.name }}"
 
           PRERELEASE=()
           case "$VERSION" in
             *-*) PRERELEASE=(--prerelease) ;;
           esac
 
-          # GitHub attaches "Source code (zip)" and "(tar.gz)" to the tag automatically,
-          # so only the published plugin zip is uploaded here.
+          # GitHub attaches "Source code (zip)" and "(tar.gz)" to the tag automatically, so only
+          # the published plugin zips are uploaded here.
           gh release create "$TAG" \
-            --title "Ranks | $TAG" \
+            --title "$NAME | $TAG" \
             --notes-file release-notes.md \
             --target "${{ github.sha }}" \
             "${PRERELEASE[@]}" \
