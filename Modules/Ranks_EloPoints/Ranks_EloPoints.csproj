@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Ranks_EloPoints</AssemblyName>
+    <RootNamespace>Ranks.EloPoints</RootNamespace>
+    <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
+    <PublishDir>$(OutputPath)publish/Ranks_EloPoints</PublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="SwiftlyS2.CS2" Version="*-*" ExcludeAssets="runtime" PrivateAssets="all" />
+
+    <!-- FluentMigrator is compile-only here: core owns the runner, this module only declares the
+         Migration class it hands over. Shipping the runtime assets would put a second copy
+         beside core's. -->
+    <PackageReference Include="FluentMigrator" Version="8.*" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=false is load-bearing, not tidiness: copying Ranks.Contract.dll next to this
+         plugin makes the host load a SECOND one, giving IRanksApi two Type identities, and
+         TryGetSharedInterface silently stops matching on a server where Ranks is plainly running
+         (FR-API-00). -->
+    <ProjectReference Include="../../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
+
+    <!-- Same single-copy rule, but a HARD dependency: this module publishes IEloPointsApi from it.
+         Core ships the single copy in resources/exports. -->
+    <ProjectReference Include="../Ranks.Modules.Contract/Ranks.Modules.Contract.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The self-check harness is a throwaway console app that links three of this module's
+         source files; compiling its Program.cs into the plugin would be an error waiting on a
+         glob change. -->
+    <Compile Remove=".selfcheck/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="resources/templates/**/*;resources/translations/**/*;resources/examples/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

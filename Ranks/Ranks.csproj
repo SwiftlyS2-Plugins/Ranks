@@ -1,0 +1,123 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <AssemblyName>Ranks</AssemblyName>
+    <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
+    <PublishDir>$(OutputPath)publish/Ranks</PublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- "10.*" tracks SwiftlyS2's floor: it floats its own Microsoft.Extensions minimum, and a fixed version here becomes a downgrade error on the next beta. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <!-- "*-*" = newest version including prereleases. Core.Menu (FR-CMD-06) ships only in the 1.5.0 betas. -->
+    <PackageReference Include="SwiftlyS2.CS2" Version="*-*" ExcludeAssets="runtime" PrivateAssets="all" />
+
+    <!-- Shipped normally, unlike the references above: SwiftlyS2 does not provide FluentMigrator,
+         so ExcludeAssets="runtime" would compile and then fail to resolve at load.
+         Runner.Core, not the FluentMigrator.Runner meta-package — that one drags in runners for
+         SqlServer, Oracle, Db2, Firebird, Hana, Redshift and Snowflake, and with them a
+         Microsoft.Data.SqlClient chain carrying a high-severity Pkcs advisory (NU1903). -->
+    <PackageReference Include="FluentMigrator" Version="8.*" />
+    <PackageReference Include="FluentMigrator.Runner.Core" Version="8.*" />
+    <PackageReference Include="FluentMigrator.Runner.MySql" Version="8.*" />
+    <PackageReference Include="FluentMigrator.Runner.Postgres" Version="8.*" />
+    <PackageReference Include="FluentMigrator.Runner.SQLite" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=false: the host loads resources/exports/Ranks.Contract.dll once and every module
+         binds to that instance. A second copy beside Ranks.dll gives IRanksApi two Type identities
+         and TryGetSharedInterface silently stops matching (FR-API-00). -->
+    <ProjectReference Include="../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
+
+    <!-- Referenced only for build ordering, so CopyContract can ship it: core never compiles
+         against the module contracts. ReferenceOutputAssembly=false keeps it off the compile. -->
+    <ProjectReference Include="../Modules/Ranks.Modules.Contract/Ranks.Modules.Contract.csproj"
+                      Private="false" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="resources/gamedata/**/*;resources/templates/**/*;resources/translations/**/*;resources/examples/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="examples\**\*.cs" />
+  </ItemGroup>
+
+  <UsingTask TaskName="ExtractPluginVersion"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <FilePath ParameterType="System.String" Required="true" />
+      <PluginVersion ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+          var content = System.IO.File.ReadAllText(FilePath);
+          var m = System.Text.RegularExpressions.Regex.Match(content, "Version\\s*=\\s*\"([^\"]+)\"");
+          PluginVersion = m.Success ? m.Groups[1].Value : "";
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <!-- Resolved inside a target, never in an item glob: the contract DLL does not exist during
+       project evaluation, so a glob ships nothing from a clean checkout and fails only at runtime
+       with a ReflectionTypeLoadException (guide §9.1).
+
+       Both contracts ship from here because there must be exactly one copy of each on a server:
+       two copies give an interface two Type identities and TryGetSharedInterface silently stops
+       matching. Core does not use Ranks.Modules.Contract itself — it is the only component
+       guaranteed present for every module, which makes it the only correct place to ship it. -->
+  <Target Name="CopyContract" AfterTargets="Build">
+    <PropertyGroup>
+      <_ContractDll>$(MSBuildThisFileDirectory)../Ranks.Contract/build/$(TargetFramework)/Ranks.Contract.dll</_ContractDll>
+      <_ModulesContractDll>$(MSBuildThisFileDirectory)../Modules/Ranks.Modules.Contract/build/$(TargetFramework)/Ranks.Modules.Contract.dll</_ModulesContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ContractDll)')"
+           Text="CopyContract: $(_ContractDll) is missing. Build Ranks.Contract first." />
+    <Error Condition="!Exists('$(_ModulesContractDll)')"
+           Text="CopyContract: $(_ModulesContractDll) is missing. Build Ranks.Modules.Contract first." />
+    <Copy SourceFiles="$(_ContractDll);$(_ModulesContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyContractToPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <_ContractDll>$(MSBuildThisFileDirectory)../Ranks.Contract/build/$(TargetFramework)/Ranks.Contract.dll</_ContractDll>
+      <_ModulesContractDll>$(MSBuildThisFileDirectory)../Modules/Ranks.Modules.Contract/build/$(TargetFramework)/Ranks.Modules.Contract.dll</_ModulesContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ContractDll)')"
+           Text="CopyContractToPublish: $(_ContractDll) is missing. Build Ranks.Contract first." />
+    <Error Condition="!Exists('$(_ModulesContractDll)')"
+           Text="CopyContractToPublish: $(_ModulesContractDll) is missing. Build Ranks.Modules.Contract first." />
+    <Copy SourceFiles="$(_ContractDll);$(_ModulesContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CreateZip" AfterTargets="Publish">
+    <ExtractPluginVersion FilePath="$(MSBuildThisFileDirectory)src\Entrypoint.cs">
+      <Output TaskParameter="PluginVersion" PropertyName="_PluginVersion" />
+    </ExtractPluginVersion>
+    <Error Condition="'$(_PluginVersion)' == ''"
+           Text="CreateZip: failed to extract PluginMetadata.Version from src\Entrypoint.cs." />
+
+    <ItemGroup>
+      <PublishFiles Include="$(PublishDir)**\*.*" />
+    </ItemGroup>
+    
+    <ZipDirectory SourceDirectory="$(PublishDir)../" DestinationFile="$(OutputPath)../$(AssemblyName)-v$(_PluginVersion).zip" Overwrite="true" />
+  </Target>
+
+</Project> 

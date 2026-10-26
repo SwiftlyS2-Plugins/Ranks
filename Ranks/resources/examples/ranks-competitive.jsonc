@@ -1,0 +1,34 @@
+// Ranks - 18-entry competitive ladder.
+//
+// Copy this over configs/ranks.jsonc and set Scoreboard.RankMode to "Competitive" in config.jsonc.
+// The two go together: Competitive mode renders a skill-group ICON and not the point total, so a
+// seven-band ladder would leave the player with an icon that changes twice a season and no visible
+// progress. This file maps 1:1 onto CS2's 18 skill groups, so every band is a distinct icon.
+//
+// Thresholds are spaced evenly to 30000, matching the Premier ladder's top. Re-tune them to your
+// server's pace rather than treating them as authoritative - at the shipped point values an
+// average regular earns roughly 190 points/hour.
+{
+  "Ladder": {
+    "Tiers": [
+      { "Name": "Silver I",            "Tag": "S1",  "Color": "grey",      "Hex": "#B0C3D9", "Points": 0,     "SkillGroup": 1 },
+      { "Name": "Silver II",           "Tag": "S2",  "Color": "grey",      "Hex": "#B0C3D9", "Points": 1000,  "SkillGroup": 2 },
+      { "Name": "Silver III",          "Tag": "S3",  "Color": "grey",      "Hex": "#B0C3D9", "Points": 2500,  "SkillGroup": 3 },
+      { "Name": "Silver IV",           "Tag": "S4",  "Color": "grey",      "Hex": "#B0C3D9", "Points": 4000,  "SkillGroup": 4 },
+      { "Name": "Silver Elite",        "Tag": "SE",  "Color": "lightblue", "Hex": "#5E98D9", "Points": 5500,  "SkillGroup": 5 },
+      { "Name": "Silver Elite Master", "Tag": "SEM", "Color": "lightblue", "Hex": "#5E98D9", "Points": 7000,  "SkillGroup": 6 },
+      { "Name": "Gold Nova I",         "Tag": "GN1", "Color": "lightblue", "Hex": "#5E98D9", "Points": 8500,  "SkillGroup": 7 },
+      { "Name": "Gold Nova II",        "Tag": "GN2", "Color": "blue",      "Hex": "#4B69FF", "Points": 10000, "SkillGroup": 8 },
+      { "Name": "Gold Nova III",       "Tag": "GN3", "Color": "blue",      "Hex": "#4B69FF", "Points": 12000, "SkillGroup": 9 },
+      { "Name": "Gold Nova Master",    "Tag": "GNM", "Color": "blue",      "Hex": "#4B69FF", "Points": 14000, "SkillGroup": 10 },
+      { "Name": "Master Guardian I",   "Tag": "MG1", "Color": "purple",    "Hex": "#8847FF", "Points": 16000, "SkillGroup": 11 },
+      { "Name": "Master Guardian II",  "Tag": "MG2", "Color": "purple",    "Hex": "#8847FF", "Points": 18000, "SkillGroup": 12 },
+      { "Name": "Master Guardian Elite", "Tag": "MGE", "Color": "magenta", "Hex": "#D32CE6", "Points": 20000, "SkillGroup": 13 },
+      { "Name": "Distinguished Master Guardian", "Tag": "DMG", "Color": "magenta", "Hex": "#D32CE6", "Points": 22000, "SkillGroup": 14 },
+      { "Name": "Legendary Eagle",     "Tag": "LE",  "Color": "red",       "Hex": "#EB4B4B", "Points": 24000, "SkillGroup": 15 },
+      { "Name": "Legendary Eagle Master", "Tag": "LEM", "Color": "red",    "Hex": "#EB4B4B", "Points": 26000, "SkillGroup": 16 },
+      { "Name": "Supreme Master First Class", "Tag": "SMFC", "Color": "red", "Hex": "#EB4B4B", "Points": 28000, "SkillGroup": 17 },
+      { "Name": "Global Elite",        "Tag": "GE",  "Color": "gold",      "Hex": "#CAAB05", "Points": 30000, "SkillGroup": 18 }
+    ]
+  }
+}

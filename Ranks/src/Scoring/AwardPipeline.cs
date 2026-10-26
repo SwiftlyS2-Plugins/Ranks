@@ -1,0 +1,338 @@
+using Microsoft.Extensions.Logging;
+using Ranks.Api;
+using Ranks.Config;
+using Ranks.Contract;
+using Ranks.Logging;
+using Ranks.Players;
+using Ranks.Ranking;
+using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Players;
+using SwiftlyS2.Shared.SchemaDefinitions;
+
+namespace Ranks.Scoring;
+
+/// <summary>Core's award path: the single place a point value becomes a stored number.</summary>
+/// <remarks>
+/// Not public API — a module reaches AddPoints / SetPoints instead (FR-API-02). The seven steps of
+/// FR-PTS-02 live here in one method so the ordering is readable; splitting them across call sites
+/// is how rounding gets applied twice.
+/// </remarks>
+internal sealed class AwardPipeline
+{
+    private readonly ISwiftlyCore _core;
+    private readonly ConfigHost<RanksConfig> _config;
+    private readonly ConfigHost<PointsConfig> _points;
+    private readonly RankLadder _ladder;
+    private readonly PlayerRegistry _registry;
+    private readonly RanksEventHub _events;
+    private readonly DetailLog _detail;
+    private readonly ILogger _logger;
+
+    public AwardPipeline(
+        ISwiftlyCore core,
+        ConfigHost<RanksConfig> config,
+        ConfigHost<PointsConfig> points,
+        RankLadder ladder,
+        PlayerRegistry registry,
+        RanksEventHub events,
+        DetailLog detail,
+        ILogger logger)
+    {
+        _core = core;
+        _config = config;
+        _points = points;
+        _ladder = ladder;
+        _registry = registry;
+        _events = events;
+        _detail = detail;
+        _logger = logger;
+    }
+
+    /// <summary>Whether every gate is currently satisfied (FR-API-05).</summary>
+    public bool ArePointsEnabled
+    {
+        get
+        {
+            var config = _config.Current;
+
+            return config.Rank.UseCoreRankingLogic
+                && HumanCount() >= config.Rank.MinPlayers
+                && (config.Rank.WarmupPoints || !IsWarmup());
+        }
+    }
+
+    /// <summary>Awards a configured event to a player, applying gates and multipliers.</summary>
+    /// <remarks>
+    /// Returns silently when core's scoring is off: with core not awarding, its gates and
+    /// multipliers have nothing to act on, so they are inert rather than quietly running against
+    /// module writes (FR-PTS-00).
+    /// </remarks>
+    public void Award(
+        PlayerRecord record,
+        string eventKey,
+        int count = 1,
+        ulong? counterparty = null,
+        bool counterpartyIsBot = false,
+        ScalingKind scaling = ScalingKind.None)
+    {
+        var config = _config.Current;
+
+        if (!config.Rank.UseCoreRankingLogic) return;
+
+        // 1. Gates. Context gates suppress only the award; the caller has already counted the
+        //    fact. PointsForBots is the exception and suppresses both, caller-side (FR-PTS-03).
+        if (!PassesGates(config, counterpartyIsBot)) return;
+
+        // 2. Base value.
+        var configured = _points.Current.Value(eventKey);
+        if (configured == 0) return;
+
+        var baseAmount = configured * count;
+
+        // 3. Subscribers may rescale or cancel.
+        var changing = _events.RaisePointsChanging(new RanksPointsChangingArgs
+        {
+            SteamId = record.SteamId,
+            EventKey = eventKey,
+            CounterpartySteamId = counterparty,
+            BaseAmount = baseAmount,
+            Amount = baseAmount,
+        });
+
+        if (changing.Cancel) return;
+
+        // 4. Core's two multipliers, multiplied together.
+        var multiplier = VipMultiplier(config, record.SteamId) * ScalingMultiplier(config, scaling, record, counterparty);
+
+        // 5. Round away from zero, once, after every multiplier — rounding per stage compounds
+        //    error, and rounding toward zero turns a small penalty into a free death.
+        var delta = (int)Math.Round(changing.Amount * multiplier, MidpointRounding.AwayFromZero);
+        if (delta == 0) return;
+
+        Apply(record, delta, eventKey, showMessage: true, counterparty);
+    }
+
+    /// <summary>Adds an already-computed amount. Never gated, multiplied or scaled.</summary>
+    /// <remarks>
+    /// Raw in both modes, which is what makes additive modules composable: the number a module
+    /// hands over is the number that lands, so two of them cannot interact through a shared
+    /// multiplier stage.
+    /// </remarks>
+    public void AddPoints(PlayerRecord record, int amount, string reason, bool showMessage)
+    {
+        if (amount == 0) return;
+
+        Apply(record, amount, reason, showMessage);
+    }
+
+    /// <summary>Replaces a player's total outright.</summary>
+    /// <remarks>
+    /// Absolute, so exactly one authority may be active — core, or one rating module, never both.
+    /// Core cannot detect the combination without tracking who is scoring, so that stays an
+    /// operator constraint (FR-PTS-00).
+    /// </remarks>
+    public void SetPoints(PlayerRecord record, int points, string reason)
+    {
+        var floor = _config.Current.Rank.MinPoints;
+        var target = Math.Max(points, floor);
+
+        if (target == record.Points) return;
+
+        Apply(record, target - record.Points, reason, showMessage: false);
+    }
+
+    private void Apply(PlayerRecord record, int delta, string reason, bool showMessage, ulong? counterparty = null)
+    {
+        var config = _config.Current;
+        var oldPoints = record.Points;
+        var oldIndex = record.RankIndex;
+
+        // 6. Floor. A negative-point ladder is not supported, and the dynamic formula assumes
+        //    non-negative points.
+        record.Points = Math.Max(oldPoints + delta, config.Rank.MinPoints);
+        record.Dirty = true;
+
+        var applied = record.Points - oldPoints;
+        if (applied == 0) return;
+
+        record.RankIndex = _ladder.IndexFor(record.Points);
+
+        _detail.Write("Ranks: {SteamId} {Delta:+#;-#;0} for {Reason} -> {Points}.", record.SteamId, applied, reason, record.Points);
+
+        _events.RaisePointsChanged(new RanksPointsChangedArgs(record.SteamId, oldPoints, record.Points, applied, reason));
+
+        if (showMessage) ReportPoints(config, record, applied, reason, counterparty);
+
+        if (record.RankIndex != oldIndex) ReportRankChange(config, record, oldIndex);
+    }
+
+    private bool PassesGates(RanksConfig config, bool counterpartyIsBot)
+    {
+        if (HumanCount() < config.Rank.MinPlayers) return false;
+        if (!config.Rank.WarmupPoints && IsWarmup()) return false;
+
+        // Bot-ness is passed in rather than inferred from the registry: a bot is never tracked, so
+        // its SteamID is never a resident record and "not in the registry" cannot tell a bot apart
+        // from an event that simply has no counterparty. This gate decides whether a human earns
+        // from a bot, never whether the bot itself is tracked.
+        if (!config.Rank.PointsForBots && counterpartyIsBot) return false;
+
+        return true;
+    }
+
+    private double VipMultiplier(RanksConfig config, ulong steamId)
+    {
+        foreach (var flag in config.Vip.Flags)
+            if (_core.Permission.PlayerHasPermission(steamId, flag))
+                return config.Vip.Multiplier;
+
+        return 1.0;
+    }
+
+    private double ScalingMultiplier(RanksConfig config, ScalingKind scaling, PlayerRecord record, ulong? counterparty)
+    {
+        if (scaling == ScalingKind.None) return 1.0;
+
+        var (enabled, min, max) = scaling == ScalingKind.Kill
+            ? (config.Points.DynamicKillPoints, config.Points.DynamicKillMin, config.Points.DynamicKillMax)
+            : (config.Points.DynamicDeathPoints, config.Points.DynamicDeathMin, config.Points.DynamicDeathMax);
+
+        if (!enabled) return 1.0;
+
+        // No counterparty is suicide, world or fall damage — there is nothing to compare against,
+        // so the configured value applies as written.
+        if (counterparty is not { } otherId) return 1.0;
+
+        var other = _registry.BySteamId(otherId);
+        var otherPoints = other?.Points ?? 0;
+
+        var (victim, attacker) = scaling == ScalingKind.Kill
+            ? (otherPoints, record.Points)
+            : (record.Points, otherPoints);
+
+        return DynamicScaling.Multiplier(DynamicScaling.Difference(victim, attacker), min, max);
+    }
+
+    private void ReportPoints(RanksConfig config, PlayerRecord record, int delta, string reason, ulong? counterparty)
+    {
+        if (!config.General.ShowPointMessages || !record.ShowPointMessages) return;
+
+        // Buffered rather than sent, so a busy round produces one line instead of forty.
+        if (config.General.RoundEndSummary)
+        {
+            record.PendingSummaryPoints += delta;
+            return;
+        }
+
+        var player = FindPlayer(record.SteamId);
+        if (player is null) return;
+
+        var gained = delta > 0;
+        var opponent = CounterpartyName(config, counterparty);
+
+        player.SendChat(opponent is null
+            ? _core.Localizer[gained ? "points.gained" : "points.lost", Math.Abs(delta), DescribeReason(reason), record.Points]
+            : _core.Localizer[gained ? "points.gained_vs" : "points.lost_vs", Math.Abs(delta), DescribeReason(reason), opponent, record.Points]);
+    }
+
+    /// <remarks>
+    /// Null unless the operator asked for names <em>and</em> the counterparty is a tracked player:
+    /// a bot has no record, and inventing a label for one would make the line claim a name the
+    /// scoreboard never showed.
+    /// </remarks>
+    private string? CounterpartyName(RanksConfig config, ulong? counterparty)
+    {
+        if (!config.Points.ShowPlayerNames || counterparty is not { } steamId) return null;
+
+        var name = _registry.BySteamId(steamId)?.Name;
+
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    /// <remarks>
+    /// Only core's own keys are translated. A module calling AddPoints with its own reason gets
+    /// that string shown verbatim — core cannot ship a translation key for a reason it has never
+    /// heard of, and a missing key renders the literal {lang}.{key} marker to the player.
+    /// </remarks>
+    private string DescribeReason(string reason) =>
+        reason.StartsWith("core.", StringComparison.Ordinal) ? _core.Localizer[$"event.{reason}"] : reason;
+
+    private void ReportRankChange(RanksConfig config, PlayerRecord record, int oldIndex)
+    {
+        var tiers = _ladder.Tiers;
+        var promoted = record.RankIndex > oldIndex;
+
+        _events.RaiseRankChanged(new RanksRankChangedArgs(
+            record.SteamId, record.Points,
+            tiers[oldIndex].Name, tiers[record.RankIndex].Name,
+            oldIndex, record.RankIndex, promoted));
+
+        if (!config.General.ShowRankChangeMessages) return;
+
+        var player = FindPlayer(record.SteamId);
+        if (player is null) return;
+
+        var key = promoted ? "rank.promoted" : "rank.demoted";
+        player.SendChat(_core.Localizer[key, tiers[record.RankIndex].Name, record.Points]);
+    }
+
+    /// <summary>Flushes buffered point lines at round end (FR-PTS-08).</summary>
+    public void FlushRoundSummary()
+    {
+        if (!_config.Current.General.RoundEndSummary) return;
+
+        foreach (var record in _registry.All)
+        {
+            if (record.PendingSummaryPoints == 0) continue;
+
+            var delta = record.PendingSummaryPoints;
+            record.PendingSummaryPoints = 0;
+
+            if (!record.ShowPointMessages) continue;
+
+            FindPlayer(record.SteamId)?.SendChat(
+                _core.Localizer["points.summary", delta > 0 ? "+" : "", delta, record.Points]);
+        }
+    }
+
+    private IPlayer? FindPlayer(ulong steamId) =>
+        _core.PlayerManager.GetPlayerFromSteamId(steamId, allowUnauthorized: false);
+
+    private int HumanCount()
+    {
+        var count = 0;
+
+        foreach (var player in _core.PlayerManager.GetAllPlayers())
+            if (!player.IsFakeClient)
+                count++;
+
+        return count;
+    }
+
+    /// <remarks>
+    /// Read from the game-rules entity rather than cached on a round-start event: a hot reload
+    /// mid-warmup would otherwise start with a stale answer and pay out for the rest of it.
+    /// </remarks>
+    private bool IsWarmup()
+    {
+        try
+        {
+            foreach (var proxy in _core.EntitySystem.GetAllEntitiesByClass<CCSGameRulesProxy>())
+                return proxy.GameRules?.WarmupPeriod ?? false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Ranks: could not read warmup state; treating the round as live.");
+        }
+
+        return false;
+    }
+}
+
+/// <summary>Which dynamic bounds an award reads, if any.</summary>
+internal enum ScalingKind
+{
+    None,
+    Kill,
+    Death,
+}

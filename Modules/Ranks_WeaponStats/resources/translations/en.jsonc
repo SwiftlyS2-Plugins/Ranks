@@ -1,0 +1,15 @@
+{
+  // Ranks_WeaponStats - English.
+  //
+  // Must stay KEY-COMPLETE: a missing key renders the literal marker {lang}.{key} to the player
+  // rather than falling back to English.
+
+  "error.players_only": "[red]That command can only be used by a player.",
+  "error.unavailable": "[red]Weapon statistics are unavailable right now.",
+
+  "stats.header": "[gold]Your best weapons:",
+  "stats.empty": "You have no weapon statistics yet. Play a round and try again.",
+  "stats.row": "[lime]{0}[default] - kills [gold]{1}[default], accuracy [gold]{2}%[default], HS [gold]{3}%[default], damage [gold]{4}[default]",
+
+  "command.weaponstats.help": "Show your per-weapon kills, accuracy and headshot rate."
+}

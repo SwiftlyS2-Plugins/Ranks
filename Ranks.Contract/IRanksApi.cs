@@ -1,0 +1,112 @@
+using System.Reflection;
+using SwiftlyS2.Shared.Players;
+
+namespace Ranks.Contract;
+
+/// <summary>The <c>Ranks.Api.v1</c> shared interface.</summary>
+/// <remarks>
+/// Additive only after 1.0 — there is no package registry and therefore no version negotiation,
+/// so a renamed or re-signed member is a <c>MissingMethodException</c> at call time rather than a
+/// build error anyone sees (FR-API-00).
+/// </remarks>
+public interface IRanksApi
+{
+    /// <summary>The shared-interface key modules bind against.</summary>
+    const string InterfaceKey = "Ranks.Api.v1";
+
+    // ---- FR-API-10 readiness -------------------------------------------------
+
+    /// <summary>True once configuration is bound and the schema probe has run.</summary>
+    bool IsCoreReady { get; }
+
+    /// <remarks>
+    /// Fires once per load cycle. Check <see cref="IsCoreReady"/> first — a module loading after
+    /// core would otherwise subscribe to an event that has already fired.
+    /// </remarks>
+    event Action CoreReady;
+
+    // ---- FR-API-02 player data -----------------------------------------------
+
+    bool IsLoaded(ulong steamId);
+    bool IsLoaded(IPlayer player);
+
+    int GetPoints(ulong steamId);
+    int GetPoints(IPlayer player);
+
+    void SetPoints(ulong steamId, int points, string reason);
+    void SetPoints(IPlayer player, int points, string reason);
+
+    void AddPoints(ulong steamId, int amount, string reason, bool showMessage = true);
+    void AddPoints(IPlayer player, int amount, string reason, bool showMessage = true);
+
+    RanksPlayerSnapshot? GetSnapshot(ulong steamId);
+    RanksPlayerSnapshot? GetSnapshot(IPlayer player);
+
+    /// <summary>The tag core would write, or null when clan tags are off or the player is absent.</summary>
+    /// <remarks>Read-only and side-effect free, so a tag arbiter can ask without fighting core.</remarks>
+    string? GetDesiredClanTag(ulong steamId);
+
+    // ---- FR-API-03 statistics ------------------------------------------------
+
+    /// <summary>Reads one of core's fixed counters by key, e.g. <c>core.kills</c>.</summary>
+    /// <remarks>
+    /// Stat keys are plural, point-event keys singular — <c>core.kill</c> here is not an error and
+    /// returns 0 forever. Read-only by design; core is the single writer.
+    /// </remarks>
+    long GetStat(ulong steamId, string statKey);
+
+    // ---- FR-API-04 leaderboards and lifecycle --------------------------------
+
+    Task<IReadOnlyList<RanksLeaderboardEntry>> GetTopAsync(string statKey = "points", int limit = 10);
+    Task<int> GetPositionAsync(ulong steamId, string statKey = "points");
+    Task<int> GetTotalRankedAsync();
+
+    /// <remarks>Every event below is raised on the game thread, and that is part of the contract.</remarks>
+    event Action<RanksPlayerSnapshot> PlayerDataLoaded;
+
+    event Action<RanksPointsChangingArgs> PointsChanging;
+    event Action<RanksPointsChangedArgs> PointsChanged;
+    event Action<RanksRankChangedArgs> RankChanged;
+    event Action<RanksPlayerSnapshot> PlayerDataSaved;
+
+    /// <summary>Purged SteamIDs, so a module can sweep its own tables in the same pass (FR-DB-08).</summary>
+    event Action<IReadOnlyList<ulong>> PlayersPurged;
+
+    /// <summary>Core's quiet window, raised after core's own maintenance completes (FR-DB-09).</summary>
+    event Action MaintenanceDue;
+
+    // ---- FR-API-05 gates and settings ----------------------------------------
+
+    bool ArePointsEnabled { get; }
+
+    /// <summary>A fresh snapshot per call, so it tracks live config reloads.</summary>
+    RanksPointSettings GetPointSettings();
+
+    // ---- FR-API-06 database coordination -------------------------------------
+
+    string ConnectionName { get; }
+
+    /// <summary>Applies the operator's prefix and suffix to a base name such as <c>ranks_players</c>.</summary>
+    string ResolveTableName(string baseName);
+
+    /// <summary>Hands an assembly's migrations to core, which owns the runner.</summary>
+    /// <remarks>
+    /// Call from the handshake, not <c>Load</c> — there is no API yet in <c>Load</c>. Idempotent:
+    /// core dedupes on (assembly, pluginId) and migrates each exactly once per process.
+    /// </remarks>
+    void RegisterMigrations(Assembly assembly, string pluginId);
+
+    // ---- FR-API-07 scoreboard override ---------------------------------------
+
+    void SetScoreboardOverride(IPlayer player, int displayPoints);
+    void ClearScoreboardOverride(IPlayer player);
+    int? GetScoreboardOverride(IPlayer player);
+
+    // ---- FR-API-09 explicit persistence --------------------------------------
+
+    /// <summary>False when the SteamID is not tracked; a failed load leaves a player untracked.</summary>
+    Task<bool> SavePlayerAsync(ulong steamId);
+
+    /// <summary>Returns records committed. Coalesces — a concurrent call joins the in-flight pass.</summary>
+    Task<int> SaveAllAsync();
+}

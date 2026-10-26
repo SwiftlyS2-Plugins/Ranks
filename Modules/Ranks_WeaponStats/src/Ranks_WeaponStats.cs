@@ -1,0 +1,235 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Primitives;
+using Microsoft.Extensions.Logging;
+using Ranks.Modules.Contract;
+using Ranks.WeaponStats.Api;
+using Ranks.WeaponStats.Commands;
+using Ranks.WeaponStats.Config;
+using Ranks.WeaponStats.Stats;
+using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Events;
+using SwiftlyS2.Shared.Plugins;
+
+namespace Ranks.WeaponStats;
+
+[PluginMetadata(
+    Id = "Ranks_WeaponStats",
+    Version = "1.0.0",
+    Name = "Ranks WeaponStats",
+    Author = "Shmitzas",
+    Description = "Per-weapon and per-hitgroup statistics for the Ranks plugin.")]
+public sealed class RanksWeaponStats : BasePlugin
+{
+    private ILogger _logger = null!;
+    private IDisposable? _reload;
+    private WeaponStatsConfig _config = null!;
+    private CommandsConfig _commandsConfig = null!;
+    private Writer _writer = null!;
+    private Collector _collector = null!;
+    private StatsCommands _commands = null!;
+    private RanksBridge _bridge = null!;
+    private WeaponStatsApi _api = null!;
+
+    private CancellationTokenSource? _flushTimer;
+    private bool _reconciled;
+    private bool _hotReload;
+
+    public RanksWeaponStats(ISwiftlyCore core) : base(core)
+    {
+    }
+
+    public override void Load(bool hotReload)
+    {
+        _hotReload = hotReload;
+        _logger = Core.LoggerFactory.CreateLogger("Ranks_WeaponStats");
+
+        WeaponNamesSelfCheck.Run();
+        LoadConfiguration();
+
+        _writer = new Writer(Core, _logger);
+        _collector = new Collector(Core, _config, _logger);
+        _commands = new StatsCommands(Core, _writer, _config, _logger);
+        _bridge = new RanksBridge(Core, _writer, _logger);
+        _bridge.CoreReady += OnRanksReady;
+        _api = new WeaponStatsApi(Core, _writer, _collector, _logger);
+
+        // Exactly once. Registering twice double-counts every shot.
+        Core.Registrator.Register(_collector);
+
+        Core.Event.OnClientPutInServer += OnPutInServer;
+        Core.Event.OnClientDisconnected += OnDisconnected;
+        Core.Event.OnMapUnload += OnMapUnload;
+
+        _commands.RegisterAll(_commandsConfig);
+        StartFlushTimer();
+
+        if (hotReload) AdoptConnectedPlayers();
+    }
+
+    /// <remarks>
+    /// Acquired here rather than in Load: the shared interface does not exist yet in Load, which
+    /// is also why RegisterMigrations cannot live there.
+    /// </remarks>
+    public override void UseSharedInterface(IInterfaceManager interfaceManager) => _bridge.TryAcquire(interfaceManager);
+
+    public override void OnSharedInterfaceInjected(IInterfaceManager interfaceManager) => _bridge.TryAcquire(interfaceManager);
+
+    /// <remarks>
+    /// Published unconditionally, and without the JIT isolation the Ranks API needs: this module
+    /// hard-requires the assembly it publishes from, exactly as core does with Ranks.Contract.
+    /// The API answers from the database plus the unflushed session delta, so it stays correct
+    /// whether or not core is present.
+    /// </remarks>
+    public override void ConfigureSharedInterface(IInterfaceManager interfaceManager) =>
+        interfaceManager.AddSharedInterface<IWeaponStatsApi, WeaponStatsApi>(IWeaponStatsApi.InterfaceKey, _api);
+
+    /// <remarks>
+    /// Absence is reported from here, not from the binder: the binder runs on every rebuild and
+    /// would spam, while this runs once per load cycle and is the only point where field state is
+    /// authoritative.
+    /// </remarks>
+    public override void OnAllPluginsLoaded()
+    {
+        if (_bridge.IsAvailable) return;
+
+        _logger.LogWarning(
+            "Ranks_WeaponStats: the Ranks plugin is not present, so this module is idle. " +
+            "No statistics are being recorded and no tables were created.");
+    }
+
+    public override void Unload()
+    {
+        _flushTimer?.Cancel();
+        _flushTimer = null;
+
+        Core.Event.OnClientPutInServer -= OnPutInServer;
+        Core.Event.OnClientDisconnected -= OnDisconnected;
+        Core.Event.OnMapUnload -= OnMapUnload;
+
+        _commands?.UnregisterAll();
+
+        FlushNow();
+
+        _bridge?.Unwire();
+        _reload?.Dispose();
+    }
+
+    /// <remarks>
+    /// Bound off <c>Core.Configuration.Manager</c>, the root the framework already owns and
+    /// watches — no ServiceCollection and no IOptionsMonitor needed to get a live reload.
+    /// </remarks>
+    private void LoadConfiguration()
+    {
+        Core.Configuration
+            // addMissingKeys: a plugin upgrade inserts new keys into an existing file with their
+            // defaults, leaving the operator's values and formatting alone.
+            .InitializeJsonWithModel<WeaponStatsConfig>("config.jsonc", "WeaponStats", true)
+            .InitializeJsonWithModel<CommandsConfig>("commands.jsonc", "Commands", true)
+            // The full path matters: AddJsonFile resolves relative to the process working
+            // directory, not the plugin folder.
+            .Configure(builder =>
+            {
+                builder.AddJsonFile(Core.Configuration.GetConfigPath("config.jsonc"), optional: false, reloadOnChange: true);
+                builder.AddJsonFile(Core.Configuration.GetConfigPath("commands.jsonc"), optional: false, reloadOnChange: true);
+            });
+
+        _config = BindConfig();
+        _commandsConfig = Core.Configuration.Manager.GetSection("Commands").Get<CommandsConfig>() ?? new CommandsConfig();
+
+        // The snapshot is reassigned rather than captured once, which is what keeps DetailedLogging
+        // and the two Tracking switches live without a restart. Command names are not re-read:
+        // renaming one needs the old registration dropped, so it stays restart-only.
+        _reload = ChangeToken.OnChange(Core.Configuration.Manager.GetReloadToken, () =>
+        {
+            var incoming = BindConfig();
+
+            _config = incoming;
+            _collector?.UpdateConfig(incoming);
+            _commands?.UpdateConfig(incoming);
+        });
+    }
+
+    private WeaponStatsConfig BindConfig()
+    {
+        var bound = Core.Configuration.Manager.GetSection("WeaponStats").Get<WeaponStatsConfig>() ?? new WeaponStatsConfig();
+        bound.Clamp();
+
+        return bound;
+    }
+
+    private void StartFlushTimer()
+    {
+        var interval = _config.Database.FlushIntervalSeconds;
+        if (interval <= 0) return;
+
+        // Deliberately not paired with StopOnMapChange: the flush must outlive a map change, and
+        // OnMapUnload is a flush point rather than a teardown.
+        _flushTimer = Core.Scheduler.RepeatBySeconds(interval, FlushNow);
+    }
+
+    private void OnPutInServer(IOnClientPutInServerEvent e)
+    {
+        if (Core.PlayerManager.GetPlayer(e.PlayerId) is { } player) _collector.Adopt(player);
+    }
+
+    /// <remarks>Takes the final delta <em>before</em> clearing the slot, in that order.</remarks>
+    private void OnDisconnected(IOnClientDisconnectedEvent e)
+    {
+        if (_collector.Release(e.PlayerId)?.Detach() is { } delta)
+            _ = _writer.FlushAsync([delta]);
+    }
+
+    private void OnMapUnload(IOnMapUnloadEvent e) => FlushNow();
+
+    private void FlushNow()
+    {
+        if (!_writer.IsReady) return;
+
+        _ = _writer.FlushAsync(_collector.DetachAll());
+    }
+
+    private void AdoptConnectedPlayers()
+    {
+        foreach (var player in Core.PlayerManager.GetAllPlayers())
+            if (!player.IsFakeClient)
+                _collector.Adopt(player);
+    }
+
+    private void OnRanksReady()
+    {
+        WarnOnFfaMismatch();
+        ReconcileOrphansOnce();
+    }
+
+    /// <remarks>
+    /// Ungated by DetailedLogging: it fires once, and it is the only signal between a
+    /// misconfigured server and a module that looks broken. It warns rather than auto-correcting —
+    /// an operator may run FFA and still not want friendly fire counted, and silently overriding
+    /// their config would be the worse surprise. There is no warning for the reverse: counting
+    /// total damage output on a team server is a legitimate choice.
+    /// </remarks>
+    private void WarnOnFfaMismatch()
+    {
+        if (_bridge.IsFfaMode() is not true || _config.Tracking.CountFriendlyFire) return;
+
+        _logger.LogWarning(
+            "Ranks_WeaponStats: core reports FFA mode but Tracking.CountFriendlyFire is false — " +
+            "same-team hits and kills will not be recorded, which on an FFA server is nearly all of them. " +
+            "Set Tracking.CountFriendlyFire to true.");
+    }
+
+    /// <remarks>
+    /// Cold start only, matching the rule that heavy work runs when no player can feel it. Skipped
+    /// on hot reload, and skipped when core could not resolve its table — deleting against a
+    /// half-broken schema is worse than leaving orphans.
+    /// </remarks>
+    private void ReconcileOrphansOnce()
+    {
+        if (_reconciled || _hotReload) return;
+
+        _reconciled = true;
+
+        if (_bridge.ResolveTable("ranks_players") is { } playersTable)
+            _ = _writer.ReconcileOrphansAsync(playersTable);
+    }
+}

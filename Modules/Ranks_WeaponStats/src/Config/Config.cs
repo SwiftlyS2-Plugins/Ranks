@@ -1,0 +1,84 @@
+using System.ComponentModel;
+
+namespace Ranks.WeaponStats.Config;
+
+/// <summary>What counts, and what is deliberately excluded.</summary>
+internal sealed class TrackingConfig
+{
+    [Description("Record hits, damage and kills against a teammate. Turn this on for FFA servers, where same-team is nearly every interaction.")]
+    public bool CountFriendlyFire { get; set; }
+
+    /// <remarks>
+    /// Both default to false to match core's <c>Rank.PointsForBots</c>, which gates bot kills,
+    /// deaths and assists out of its own counters (FR-PTS-03). Defaulting them to true would make
+    /// the shipped configuration fail to reconcile: this module would count bot interactions that
+    /// core does not. Flip both only alongside core's switch.
+    /// </remarks>
+    [Description("Record interactions where the victim is a bot. Match this to core's Rank.PointsForBots.")]
+    public bool CountAgainstBots { get; set; }
+
+    [Description("Record interactions where the attacker is a bot. Match this to core's Rank.PointsForBots.")]
+    public bool CountFromBots { get; set; }
+}
+
+internal sealed class DatabaseConfig
+{
+    [Description("Seconds between flushes of accumulated stats. 0 disables the timer; disconnect, map change and unload still flush.")]
+    public int FlushIntervalSeconds { get; set; } = 120;
+}
+
+internal sealed class DisplayConfig
+{
+    [Description("How many weapons to list in !weaponstats.")]
+    public int TopWeapons { get; set; } = 10;
+
+    [Description("Hide weapons with fewer shots than this, so one stray shot does not fill the list.")]
+    public int MinShotsToList { get; set; } = 10;
+}
+
+internal sealed class GeneralConfig
+{
+    [Description("Narrate expected flow. Warnings and errors are never gated by this.")]
+    public bool DetailedLogging { get; set; }
+}
+
+/// <summary>The module's <c>config.jsonc</c>.</summary>
+internal sealed class WeaponStatsConfig
+{
+    public TrackingConfig Tracking { get; set; } = new();
+
+    public DatabaseConfig Database { get; set; } = new();
+
+    public DisplayConfig Display { get; set; } = new();
+
+    public GeneralConfig General { get; set; } = new();
+
+    /// <summary>Clamps out-of-range values rather than throwing — these are tuning errors.</summary>
+    public void Clamp()
+    {
+        Database.FlushIntervalSeconds = Math.Max(0, Database.FlushIntervalSeconds);
+        Display.TopWeapons = Math.Clamp(Display.TopWeapons, 1, 50);
+        Display.MinShotsToList = Math.Max(0, Display.MinShotsToList);
+    }
+}
+
+/// <summary>One command's operator-editable surface.</summary>
+internal sealed class CommandDefinition
+{
+    public string Command { get; set; } = "";
+
+    public List<string> Aliases { get; set; } = [];
+
+    public string Permission { get; set; } = "";
+}
+
+internal sealed class CommandsConfig
+{
+    public const string WeaponStats = "weaponstats";
+
+    [Description("Command names, aliases and permissions. An empty Command removes the command.")]
+    public Dictionary<string, CommandDefinition> All { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [WeaponStats] = new() { Command = "weaponstats", Aliases = ["ws"] },
+    };
+}

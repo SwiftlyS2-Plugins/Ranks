@@ -1,0 +1,25 @@
+// Ranks_EloPoints - 10-band rating ladder.
+//
+// Copy this over configs/ranks.jsonc. Core's default ladder is built for points that only ever
+// accumulate, so with Elo ratings it leaves everyone in the bottom tier for good.
+//
+// Thresholds are centred on Rank.StartPoints = 1000, which is where an unrated player enters.
+// Roughly half the population should sit in bands 4-6; re-tune to your server rather than
+// treating these as authoritative. With K = 50 a decisive match moves about 25 points, so a band
+// is two to six matches wide.
+{
+  "Ladder": {
+    "Tiers": [
+      { "Name": "Level 1",  "Tag": "L1",  "Color": "grey",      "Hex": "#B0C3D9", "Points": 0,    "SkillGroup": 1 },
+      { "Name": "Level 2",  "Tag": "L2",  "Color": "grey",      "Hex": "#B0C3D9", "Points": 750,  "SkillGroup": 3 },
+      { "Name": "Level 3",  "Tag": "L3",  "Color": "lightblue", "Hex": "#5E98D9", "Points": 900,  "SkillGroup": 5 },
+      { "Name": "Level 4",  "Tag": "L4",  "Color": "lightblue", "Hex": "#5E98D9", "Points": 1000, "SkillGroup": 7 },
+      { "Name": "Level 5",  "Tag": "L5",  "Color": "blue",      "Hex": "#4B69FF", "Points": 1100, "SkillGroup": 9 },
+      { "Name": "Level 6",  "Tag": "L6",  "Color": "blue",      "Hex": "#4B69FF", "Points": 1250, "SkillGroup": 11 },
+      { "Name": "Level 7",  "Tag": "L7",  "Color": "purple",    "Hex": "#8847FF", "Points": 1400, "SkillGroup": 13 },
+      { "Name": "Level 8",  "Tag": "L8",  "Color": "purple",    "Hex": "#8847FF", "Points": 1550, "SkillGroup": 15 },
+      { "Name": "Level 9",  "Tag": "L9",  "Color": "pink",      "Hex": "#D32CE6", "Points": 1750, "SkillGroup": 17 },
+      { "Name": "Level 10", "Tag": "L10", "Color": "gold",      "Hex": "#FFD700", "Points": 2000, "SkillGroup": 18 }
+    ]
+  }
+}

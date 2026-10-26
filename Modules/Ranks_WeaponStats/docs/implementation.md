@@ -1,0 +1,608 @@
+# Ranks_WeaponStats — implementation
+
+> **Status:** design. Provisional on two open core-API items, both flagged
+> inline. Everything else is settled against verified API surface.
+> Companion to [features.md](features.md); core conventions it inherits live in
+> the [implementation guide](../../../docs/implementation-guide.md).
+
+This module is the **floor case for a table-owning module**: it writes to core's
+database, obeys core's purge, and asks core for nothing else. If the shape below
+is awkward, `RanksModuleBase` is wrong — not this module.
+
+---
+
+## 1. Layout
+
+```
+Modules/Ranks_WeaponStats/
+├── README.md
+├── docs/
+│   ├── features.md
+│   └── implementation.md
+├── Ranks_WeaponStats.csproj
+├── resources/
+│   ├── templates/config.jsonc
+│   ├── templates/commands.jsonc
+│   └── translations/en.jsonc
+└── src/
+    ├── Ranks_WeaponStats.cs      # BasePlugin, lifecycle, contract isolation
+    ├── Api/RanksBridge.cs        # the ONLY file naming IRanksApi
+    ├── Config/Config.cs
+    ├── Migrations/M0001_Tables.cs
+    ├── Stats/Collector.cs        # game-event handlers, hot path
+    ├── Stats/SessionStats.cs
+    ├── Stats/Writer.cs           # off-thread, additive upserts
+    └── Commands/StatsCommands.cs
+```
+
+`Ranks_WeaponStats` — underscore, in the folder, the project and the
+`[PluginMetadata] Id`. Core derives the migration ledger from that id.
+
+---
+
+## 2. Lifecycle
+
+### 2.1 ⚠️ Contract isolation comes first
+
+This is the one mistake that takes the **whole server** down, not just this
+module. Per implementation guide §10.2, the CLR resolves every type a method
+*names* when it JITs that method. On a box without `Ranks`, a field typed
+`IRanksApi?` is enough to throw `FileNotFoundException` at the caller's frame,
+and SwiftlyS2 reports `Hosting failed to start` for **every plugin installed**.
+
+So exactly one file names the contract, and every member that touches it is
+`[MethodImpl(MethodImplOptions.NoInlining)]`:
+
+```csharp
+internal sealed class RanksBridge
+{
+    private object? _api;                       // deliberately not IRanksApi
+    public bool IsAvailable { get; private set; }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool TryAcquire(ISwiftlyCore core) { /* names IRanksApi, nothing else does */ }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void Unwire() { }                    // Unload needs the type too — easy to miss
+}
+```
+
+Everywhere else reads `bridge.IsAvailable`, a plain `bool`.
+
+**Audit rule:** grep the *field name* across the whole plugin, not the type
+name. `_api.PointsChanged -= handler` in `Unload` is the classic survivor.
+
+### 2.2 Where things go
+
+| Step | Work |
+|---|---|
+| Constructor | nothing |
+| `Load` | config, game-event handlers, `Core.Registrator.Register(collector)`, core-event subscriptions, flush timer |
+| `UseSharedInterface` | acquire the API through the bridge; `RegisterMigrations(assembly)` |
+| `OnAllPluginsLoaded` | if `Ranks` is absent, log one ungated warning and stay idle |
+| `Unload` | final flush, then unwire |
+
+`RegisterMigrations` goes in the handshake, not `Load` — there is no API yet in
+`Load` (guide §10.5). Core dedupes on `(assembly, pluginId)`, so the handshake
+re-running on every other plugin's load is harmless.
+
+### 2.3 Handlers outside the plugin class must be registered
+
+`Collector` holds the `[GameEventHandler]` methods, so it is invisible to the
+framework until:
+
+```csharp
+Core.Registrator.Register(_collector);   // exactly once
+```
+
+Registering twice double-counts every shot. Signatures must match the expected
+delegate exactly or the method is silently skipped.
+
+### 2.4 Hot reload
+
+`Load(hotReload: true)` runs with players connected. Re-adopt them from
+`Core.PlayerManager`, filtering `IsFakeClient`, rather than waiting for a
+steam-authorize event that already fired.
+
+---
+
+## 3. Configuration
+
+```csharp
+Core.Configuration.InitializeJsonWithModel<Config>("config.jsonc", "WeaponStats");
+Core.Configuration.InitializeJsonWithModel<CommandsConfig>("commands.jsonc", "Commands");
+```
+
+Validate at load, clamping rather than throwing:
+
+| Key | Rule |
+|---|---|
+| `Tracking.CountFriendlyFire` | bool, no validation — default `false` |
+| `Tracking.CountAgainstBots` | bool, no validation — default `false` |
+| `Tracking.CountFromBots` | bool, no validation — default `false` |
+| `Database.FlushIntervalSeconds` | `>= 0`; `0` disables the timer |
+| `Display.TopWeapons` | `1..50` |
+| `Display.MinShotsToList` | `>= 0` |
+
+**All three `Tracking` defaults are the binder's own `default(bool)`.** That is
+correct for each of them now: `CountFriendlyFire` was always meant to be off,
+and the two bot switches default off to match core's `Rank.PointsForBots`, which
+gates bot interactions out of core's counters (FR-PTS-03). An absent or
+malformed key therefore lands on the reconciling value rather than away from it,
+so none of them needs an explicit initialiser.
+
+The two flags are read on the hit and kill paths, so they follow guide §3.2:
+hold a `volatile` snapshot reference swapped in the reload handler, not
+`CurrentValue` per access. `General.DetailedLogging` rides the same snapshot —
+which keeps it live, since the snapshot is reassigned by `OnChange` rather than
+captured at construction.
+
+---
+
+## 4. Database
+
+### 4.1 Migration
+
+One migration, one table pair. The base name **includes the `ranks_`
+namespace** — FR-DB-03's resolver adds only the operator's prefix and suffix
+around a base name that is already `ranks_players` for core, so a module writes
+`ranks_weapon_stats` and gets `awp_ranks_weapon_stats` on a prefixed server:
+
+```csharp
+[Migration(20261012120000)]
+public sealed class M0001_Tables : Migration
+{
+    public override void Up()
+    {
+        Create.Table("ranks_weapon_stats")
+            .WithColumn("steam_id").AsInt64().NotNullable().PrimaryKey()
+            .WithColumn("weapon").AsString(64).NotNullable().PrimaryKey()
+            .WithColumn("shots").AsInt64().NotNullable().WithDefaultValue(0)
+            .WithColumn("hits").AsInt64().NotNullable().WithDefaultValue(0)
+            .WithColumn("damage").AsInt64().NotNullable().WithDefaultValue(0)
+            .WithColumn("kills").AsInt64().NotNullable().WithDefaultValue(0)
+            .WithColumn("deaths").AsInt64().NotNullable().WithDefaultValue(0)
+            .WithColumn("headshots").AsInt64().NotNullable().WithDefaultValue(0);
+
+        Create.Table("ranks_hit_stats")
+            .WithColumn("steam_id").AsInt64().NotNullable().PrimaryKey()
+            .WithColumn("hitgroup").AsInt16().NotNullable().PrimaryKey()
+            .WithColumn("hits").AsInt64().NotNullable().WithDefaultValue(0)
+            .WithColumn("damage").AsInt64().NotNullable().WithDefaultValue(0);
+    }
+
+    public override void Down()
+    {
+        Delete.Table("ranks_hit_stats");
+        Delete.Table("ranks_weapon_stats");
+    }
+}
+```
+
+Four things here are deliberate:
+
+- **The composite PK is declared inline**, which guide §4.5 authoring rule 3
+  makes mandatory rather than stylistic: MySQL names every primary key
+  `PRIMARY`, so a `Schema.Table(t).Constraint("pk_x").Exists()` guard is always
+  false and the follow-up `ADD CONSTRAINT … PRIMARY KEY` fails with *Multiple
+  primary key defined*. Inline is also the only portable composite key on
+  SQLite. The PK itself is non-negotiable — without it the upsert in §4.2
+  silently duplicates on MySQL and outright fails on PostgreSQL and SQLite.
+- **Migration ids only need to be unique within this assembly.** The module has
+  its own ledger (FR-DB-05), so unlike `Admins` — which hand-coordinates
+  timestamps across four plugins sharing one stock `VersionInfo` — there is
+  nothing to collide with. The `YYYYMMDDHHmm` form is still required by guide
+  §4.5 rule 1, and the number is never reused or renumbered.
+- **There is deliberately no `Schema.Table(...).Exists()` guard.** Guide §4.5
+  rule 2 asks for one, and it is unsafe here until core's processor decorator
+  rewrites existence checks as well as expressions — see §4.4. The per-module
+  ledger already prevents a re-run, which is what the guard would otherwise buy.
+- **No `Execute.Sql`.** It has no expression tree, so core cannot rewrite it and
+  the tables would miss their affixes on a prefixed server.
+
+### 4.2 The additive upsert
+
+Core writes **absolute** values because its in-memory record is authoritative
+(FR-DB-06). This module holds only **session deltas** and so writes additively.
+That is the right shape for it, not a shortcut: there is no read on connect, and
+two servers sharing a database accumulate instead of clobbering.
+
+```sql
+-- MySQL / MariaDB
+INSERT INTO {t} (steam_id, weapon, shots, hits, damage, kills, deaths, headshots)
+VALUES (@SteamId, @Weapon, @Shots, @Hits, @Damage, @Kills, @Deaths, @Headshots)
+ON DUPLICATE KEY UPDATE
+    shots = shots + VALUES(shots), hits = hits + VALUES(hits), ...;
+
+-- PostgreSQL / SQLite
+INSERT INTO {t} (...) VALUES (...)
+ON CONFLICT (steam_id, weapon) DO UPDATE SET
+    shots = {t}.shots + EXCLUDED.shots, hits = {t}.hits + EXCLUDED.hits, ...;
+```
+
+> **Keep `VALUES()` on the MySQL branch.** MySQL 8.0.20 deprecates it in favour
+> of the `AS new` row alias — which MariaDB does not support at all. `VALUES()`
+> works on both; the alias works on one.
+
+Qualify with the table name on the PostgreSQL branch (`{t}.shots`, not `shots`)
+or the reference is ambiguous against `EXCLUDED`.
+
+**`ranks_hit_stats` takes the identical shape**, keyed `(steam_id, hitgroup)`
+with `hits` and `damage` accumulating the same way. It is a second statement,
+not a special case.
+
+Table names come from `ResolveTableName` at query-build time, never string
+concatenation.
+
+### 4.3 Failure handling
+
+A failed flush must not lose the deltas. The writer owns a retry buffer and
+merges the failed batch back into it **off-thread** — never into the live
+session objects, which belong to the game thread (§5).
+
+Log at `Error` with the exception object; this is a data-loss path and is not
+gated behind `DetailedLogging`.
+
+### 4.4 Existence checks must be affixed — resolved core-side
+
+`Schema.Table("x").Exists()` calls `IMigrationProcessor` directly through
+`IQuerySchema`; it is **not** an expression, so a decorator that rewrites only
+expressions answers it for the unaffixed name.
+
+The failure is silent and permanent in exactly the setup FR-DB-03 exists for.
+One database, a default install plus an `awp_` one: the `awp_` ledger is
+separate so the migration runs, the guard asks whether `ranks_weapon_stats`
+exists, finds the **default install's** table, skips creation, and records the
+migration as applied. `awp_ranks_weapon_stats` is never created and
+`MigrateUp()` never retries.
+
+**Core's decorator now covers the whole `IQuerySchema` surface** — guide §4.5
+requires it, because the same trap applies to core's own migrations. So the
+guards in §4.1 are correct as written, and a module should use them normally.
+
+> If you are reading this while writing core's decorator: covering the
+> expressions but not the queries is a half-decorator, and the asymmetry is
+> invisible until a second affixed install appears on one database.
+
+---
+
+## 5. The hot path
+
+All three game events fire on the game thread, so the accumulation structures
+need no synchronisation at all — provided nothing else touches them.
+
+```csharp
+private readonly SessionStats?[] _slots = new SessionStats?[64];
+```
+
+Core measured the slot array holding the **record reference** at 2.8–3.3 ns
+against 11.6 ns for slot-to-identity-then-dictionary (guide §5). The same
+applies here. `IPlayer.Slot` is an `int`; the slot is cleared on disconnect,
+which is the invariant that makes the array safe.
+
+```csharp
+internal sealed class SessionStats
+{
+    public ulong SteamId;
+    public readonly Dictionary<string, WeaponCounters> Weapons = new();
+    public readonly long[] HitGroupHits   = new long[12];   // see below
+    public readonly long[] HitGroupDamage = new long[12];
+}
+```
+
+**The hitgroup array is 12 long, not 11.** `HitGroup_t` runs `GENERIC = 0`
+through `SPECIAL = 11` with a hole at `UNUSED = 9`, so indexing by the raw enum
+value needs 12 slots — an 11-element array overflows on `SPECIAL`. `INVALID` is
+`-1` and the value arrives from the engine, so it must be assumed reachable
+whether or not it is observed in practice:
+
+```csharp
+var hg = (int)e.ActualHitgroup;
+if ((uint)hg < 12) { stats.HitGroupHits[hg]++; stats.HitGroupDamage[hg] += e.ActualDmgHealth; }
+```
+
+Slot 9 stays zero forever and is skipped at flush time.
+
+Unlike a death with no weapon (§5.1), an out-of-range hitgroup is simply **not
+counted** — there is no hitgroup to attribute it to, and the hit-stats table has
+no reconciliation invariant against core, which stores no hitbox data at all.
+The weapon row for the same event is still recorded.
+
+**Read the `Actual*` properties throughout.** `DmgHealth` is a `short`;
+`Health`, `Armor` and `Hitgroup` are `byte`. A server granting more than 255 HP
+silently corrupts the narrow ones.
+
+### 5.1 Never drop an event
+
+The module's counters must reconcile against core's (features.md §1), so the
+only correct response to an awkward event is to file it somewhere — never to
+skip it.
+
+```csharp
+// weapon_fire reports the entity designer name (weapon_ak47); player_death reports the short form (ak47).
+private const string UnknownWeapon = "unknown";
+
+// Death sources that are not weapon entities, so they must never be given the prefix.
+private static readonly HashSet<string> NonWeaponSources =
+    new(StringComparer.Ordinal) { "world", "planted_c4", "inferno", "trigger_hurt" };
+
+private static string Normalize(string? weapon)
+{
+    if (string.IsNullOrWhiteSpace(weapon)) return UnknownWeapon;
+
+    var w = weapon.Trim();
+    if (!w.StartsWith("weapon_", StringComparison.Ordinal) && !NonWeaponSources.Contains(w))
+        w = "weapon_" + w;
+
+    return w.Length <= 64 ? w : UnknownWeapon;   // length checked after prefixing, not before
+}
+```
+
+**The stored form is the designer name** — `weapon_ak47`, as `entities.json`
+spells it (`CAK47` → `designer_name: "weapon_ak47"`). It is the form the entity
+system, the dumps and `weapon_fire` all agree on, so anything joining against a
+weapon list later needs no translation.
+
+**Normalising is what keeps one gun in one row.** The two events disagree:
+`weapon_fire` carries the designer name, `player_death` the short form. Store
+them verbatim and every gun gets **two rows**, shots never line up with kills,
+and accuracy is permanently wrong with nothing in the data hinting why.
+
+**`NonWeaponSources` exists because prefixing blindly would be wrong.** `world`
+(falls, console kills), `planted_c4` (the bomb), `inferno` (molotov fire) and
+`trigger_hurt` (map hazards) are not weapon entities — there is no
+`weapon_world`. They only ever arrive from `player_death` / `player_hurt`, never
+from `weapon_fire`, so they cannot collide with a real weapon's row.
+
+> **An incomplete `NonWeaponSources` list is cosmetic, not corrupting.** A death
+> source that should have been in it gets stored as `weapon_<source>` — an ugly
+> label on its own single row. No weapon's counters are split or merged by it,
+> which is why the list ships as-is and is refined from real data rather than
+> blocking on a live check.
+
+`UnknownWeapon` is `"unknown"`, carrying no prefix — it is not a weapon, and the
+absence of `weapon_` makes it impossible to collide with one. An over-length
+value becomes `unknown` rather than being cut, because truncating would merge
+two weapons into one row.
+
+This is also the one place a per-player row count could grow beyond the ~40
+weapons CS2 ships: the column is populated from an event string, so a modded
+server with many custom weapon entities produces one row per distinct name. That
+is still bounded by the weapons that exist on the server, and purge follows core
+(§8), so no cap is imposed — but it is the reason the base name is validated
+rather than trusted.
+
+`weapon_fire` is the highest-frequency handler in the plugin — roughly 200/second
+on a busy 20-player server. It does one slot lookup, one dictionary lookup and
+one increment. No allocation, no logging on the success path, no database.
+
+A bot never *owns* a row: it gets no `SessionStats` at adoption, so `_slots[slot]`
+is null and every handler returns on the null check it already has. A bot as the
+*counterparty* is a separate question, handled per event below.
+
+### 5.2 The guards
+
+Two independent filters. **Friendly fire and self damage are dropped before the
+bot switches are even consulted** — they are not configurable, because neither
+is combat performance under any setting.
+
+```csharp
+// Same slot is self damage and never counts; same team is the operator's call.
+private static bool IsExcluded(TrackingConfig c, IPlayer? attacker, IPlayer? victim)
+{
+    if (attacker is null || victim is null) return false;        // world damage is neither
+    if (attacker.Slot == victim.Slot) return true;               // self damage, in every mode
+    return !c.CountFriendlyFire && attacker.Controller.TeamNum == victim.Controller.TeamNum;
+}
+
+// A null counterparty is world damage, not a bot, and must keep counting.
+private static bool IsBot(IPlayer? p) => p is { IsFakeClient: true };
+
+private static bool CountAgainst(TrackingConfig c, IPlayer? victim)  => c.CountAgainstBots || !IsBot(victim);
+private static bool CountFrom(TrackingConfig c, IPlayer? attacker)   => c.CountFromBots    || !IsBot(attacker);
+```
+
+The config snapshot is read **once at the top of each event**, per guide §3.2
+rule 3 — a reload landing between the kill half and the death half of one
+`player_death` would otherwise mix old and new settings within a single event.
+
+| Event | Side recorded | Guards |
+|---|---|---|
+| `weapon_fire` | shooter's shots | **none** — no victim exists to test |
+| `player_hurt` | attacker's hits, damage, hitgroup | `!IsExcluded` **and** `CountAgainst(victim)` |
+| `player_death` | attacker's kills, headshots | `!IsExcluded` **and** `CountAgainst(victim)` |
+| `player_death` | victim's deaths | `CountFrom(attacker)` only |
+
+**Deaths deliberately skip `IsExcluded`.** Being killed by a teammate is still a
+death, `ranks_players.deaths` counts every death (FR-DB-04), and the
+reconciliation in features.md §1 depends on the two agreeing.
+
+**Kills do apply it**, matching the call core makes: with friendly fire off, a
+team kill is `core.team_kill` rather than `core.kill` and does not increment
+`ranks_players.kills` either.
+
+#### The FFA mismatch warning
+
+```csharp
+// In OnCoreReady, not Load: Api does not exist yet in Load.
+protected override void OnCoreReady()
+{
+    if (Api.GetPointSettings().FfaMode && !_cfg.Tracking.CountFriendlyFire)
+        _logger.LogWarning(
+            "Core reports FFA mode but Tracking.CountFriendlyFire is false — same-team hits " +
+            "and kills will not be recorded, which on an FFA server is nearly all of them. " +
+            "Set Tracking.CountFriendlyFire to true.");
+}
+```
+
+Ungated by `DetailedLogging`: it fires once, and it is the only signal between a
+misconfigured server and a module that looks broken. It **warns rather than
+auto-corrects** — an operator may run FFA and still not want friendly fire
+counted, and silently overriding their config would be the worse surprise. There
+is no warning for the reverse (friendly fire on, FFA off); counting total damage
+output on a team server is a legitimate choice.
+
+The bot guard tests the **counterparty**, never the owner of the row.
+
+**A skipped event is skipped entirely, not bucketed.** This is the one exception
+to §5.1's never-drop rule, and it is either an operator instruction or a
+not-performance event — which is why features.md documents what the exclusions
+do to reconciliation.
+
+---
+
+## 6. Flush
+
+### 6.1 Snapshot on the game thread, write off it
+
+This is what makes the whole design race-free:
+
+1. On the game thread, walk the live sessions and **detach** each one's deltas,
+   zeroing the counters in place.
+2. Hand the detached batch to the writer.
+3. The writer runs off-thread and never touches a live session again.
+
+No lock, no concurrent collection, no torn read — because the only mutator and
+the only snapshotter are the same thread.
+
+### 6.2 Triggers
+
+All four are available to any plugin directly from the framework. **This module
+needs nothing from core to flush**, which is worth stating because the obvious
+alternative — piggybacking core's `PlayerDataSaved` — would couple two plugins'
+write timing for no gain:
+
+| Trigger | Source |
+|---|---|
+| Periodic | `Core.Scheduler.RepeatBySeconds(interval, …)` |
+| Player disconnect | `Core.Event.OnClientDisconnected` |
+| Map change | `Core.Event.OnMapUnload` |
+| Plugin unload | the module's own `Unload` |
+
+Two notes on the timer: `RepeatBySeconds` **fires its first callback
+immediately**, not after one period, and the returned
+`CancellationTokenSource` should *not* be passed to `StopOnMapChange` — the
+flush must outlive a map change, and `OnMapUnload` is a flush point rather than
+a teardown.
+
+On disconnect, take the final delta **before** clearing the slot, in that order.
+
+---
+
+## 7. Commands
+
+Registered at runtime so the names can come from `commands.jsonc`
+(guide §8.1) — `[Command]` only supports compile-time constants:
+
+```csharp
+foreach (var (key, cmd) in _commands.CurrentValue)
+    Core.Command.RegisterCommand(cmd.Name, Handle, false, cmd.Permission,
+                                 Core.Localizer[$"command.{key}.help"]);
+```
+
+Help text comes from the localizer, not a config field. Keep the returned
+`Guid`s if commands ever need unregistering; renames are otherwise restart-only.
+
+Output goes through `Core.Localizer` — every string shown in chat or a menu
+lives in `translations/en.jsonc`. Sorting is "best weapon first" by kills, with
+`Display.MinShotsToList` filtering the long tail.
+
+A player with no rows yet gets a localized "no stats" line, not an empty table.
+
+---
+
+## 8. Purge
+
+```csharp
+// PlayersPurged is the only notice this module will ever get. Nothing else sweeps its rows.
+api.PlayersPurged += ids => DeleteRowsAsync(ids);
+```
+
+Delete from both tables, batched. Core has already removed its own rows by the
+time this fires, so the module must not expect to look the player up.
+
+### 8.1 Orphans from a purge the module missed
+
+`PlayersPurged` is a live event. If core purges while this module is unloaded —
+an operator removing it for a map cycle, a failed load, a staged upgrade — those
+rows are never swept and the table grows without bound. Nothing else will ever
+collect them.
+
+So the module reconciles once at `Load(hotReload: false)`, matching FR-DB-09's
+"heavy work on a cold start only" rule:
+
+```sql
+DELETE FROM {weapon_stats}
+ WHERE steam_id NOT IN (SELECT steam_id FROM {ranks_players});
+```
+
+Both names come from `ResolveTableName`, so this works under any affix. It is
+safe to depend on core's table here: FR-DB-04 fixes `ranks_players` as a closed,
+known schema, which makes it a contract rather than an implementation detail.
+
+Skipped on hot reload, and skipped entirely if the probe in guide §4.6 reported
+core's tables unreadable — deleting against a half-broken schema is worse than
+leaving orphans.
+
+---
+
+## 9. Threading
+
+- Game-event handlers and the snapshot pass: **game thread**.
+- Writer, retry buffer, purge deletes: **off-thread**.
+- Nothing crosses back. The module touches no pawns or entities, so it needs no
+  `NextWorldUpdate` hop at all.
+
+> Core raises **every** API event on the game thread (FR-API-04), so
+> `PlayersPurged` arriving here is safe to act on directly — and a module that
+> wanted to touch game state from one could, which is why the guarantee is in
+> the contract rather than left to each caller.
+
+Never pass an async callback to `NextTick` / `NextWorldUpdate`; those overloads
+are `[Obsolete]` and throw at runtime.
+
+---
+
+## 10. Release checklist
+
+- [ ] Grep the contract **field name** across every file; nothing outside
+      `RanksBridge` names `IRanksApi`, including `Unload`
+- [ ] Loads cleanly on a server with **no** `Ranks` installed — and so does
+      every other plugin on that box
+- [ ] Migrations run on MySQL, PostgreSQL and SQLite, fresh and existing
+- [ ] Three different core table prefixes yield three isolated table sets and
+      three ledger rows
+- [ ] `Core.Registrator.Register` called exactly once — fire 10 shots, confirm
+      the row says 10
+- [ ] Hitgroup `SPECIAL` (11) records without an index exception; an out-of-range
+      hitgroup increments **no hitgroup counter** and still records its weapon row
+- [ ] `SUM(kills)` and `SUM(deaths)` per player reconcile against
+      `ranks_players` **at default `Tracking` settings** — including after a
+      fall death and a bot kill with `PointsForBots = false`
+- [ ] An absent `Tracking` bot key binds to `true`, not `false`
+- [ ] `CountAgainstBots = false` stops bot kills and bot hitgroups while deaths
+      to bots keep counting; `CountFromBots = false` does the reverse
+- [ ] `CountFriendlyFire = false` drops team hits, damage and kills while a
+      death to a teammate still counts; `= true` records all four
+- [ ] Firing an AK and killing with it land on **one** row named `weapon_ak47`,
+      not two — the prefix normalisation is what makes the two events agree
+- [ ] A fall death stores `world`, not `weapon_world`
+- [ ] Self damage is never recorded under either value of `CountFriendlyFire`
+- [ ] Starting with core in FFA mode and `CountFriendlyFire = false` logs the
+      mismatch warning exactly once
+- [ ] Deltas survive a failed flush and land on the retry
+- [ ] Command names grepped against sibling plugins
+- [ ] No identifier named `rank`
+
+---
+
+## Open items
+
+None. Every core-side and module-side question is settled.
+
+Core-side: handler signatures carry `RanksPlayerSnapshot`, every event is
+game-thread, and the `IQuerySchema` rewrite is mandated by guide §4.5.
+Module-side: attacker-only hitgroups with hits **and** damage, health damage
+only, friendly fire behind `Tracking.CountFriendlyFire`, self damage never
+counted, deaths counted from every source, and weapon names normalised on
+ingest so the two events cannot disagree.

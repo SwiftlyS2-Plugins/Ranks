@@ -1,0 +1,700 @@
+# Ranks_EloPoints — implementation
+
+> **Status:** design, implemented. The restart-reset question is closed
+> (confirmed on a live server, §5.3); remaining open items are in §10 and none
+> of them block.
+> Companion to [features.md](features.md); core conventions it inherits live in
+> the [implementation guide](../../../docs/implementation-guide.md).
+
+Where `Ranks_WeaponStats` is the floor case for a **table-owning** module, this
+is the floor case for an **absolute scoring** module: it replaces core's scoring
+entirely, reads core's counters as inputs, and writes the only number that
+reaches the ladder. If the shape below is awkward, the FR-PTS-00 contract is
+wrong — not this module.
+
+---
+
+## 1. Layout
+
+```
+Modules/Ranks_EloPoints/
+├── README.md
+├── docs/
+│   ├── features.md
+│   └── implementation.md
+├── Ranks_EloPoints.csproj
+├── resources/
+│   ├── templates/config.jsonc
+│   ├── translations/en.jsonc
+│   └── examples/ranks-elo.jsonc     # 10-band ladder for core's config
+└── src/
+    ├── Ranks_EloPoints.cs           # BasePlugin, lifecycle, contract isolation
+    ├── Api/RanksBridge.cs           # the ONLY file naming IRanksApi
+    ├── Api/CoreTypes.cs             # CoreSettings, the flattened view of core's settings
+    ├── Config/Config.cs
+    ├── Migrations/M202610261200_Rating.cs
+    ├── Match/MatchTracker.cs        # game-event handlers, match state machine
+    ├── Match/MatchSession.cs        # one player's accrual for one match
+    ├── Rating/EloMath.cs            # pure, static, no engine types
+    ├── Rating/Performance.cs        # PerfCounters, weights, percentile
+    ├── Rating/EloMathSelfCheck.cs
+    └── Rating/RatingStore.cs        # off-thread reads and writes
+```
+
+`Ranks_EloPoints` — underscore, in the folder, the project and the
+`[PluginMetadata] Id`. Core derives the migration ledger from that id.
+
+**`EloMath` names no SwiftlyS2 type and no contract type.** Everything it needs
+arrives as `double`, `int` and arrays, which is what lets the self-check run it
+in a throwaway console harness with neither the framework nor a server present.
+
+---
+
+## 2. Lifecycle
+
+### 2.1 ⚠️ Contract isolation comes first
+
+Identical to `Ranks_WeaponStats`, and for the same reason: per implementation
+guide §10.2 the CLR resolves every type a method *names* when it JITs that
+method, so on a box without `Ranks` a field typed `IRanksApi?` throws
+`FileNotFoundException` at the **caller's** frame, and SwiftlyS2 reports
+`Hosting failed to start` for every plugin installed.
+
+Exactly one file — `Api/RanksBridge.cs` — names a contract type, every member
+touching one is `[MethodImpl(MethodImplOptions.NoInlining)]`, and the field is
+`object?`:
+
+```csharp
+internal sealed class RanksBridge
+{
+    private object? _api;                       // deliberately not IRanksApi
+    private object? _module;
+    public bool IsAvailable { get; private set; }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool TryAcquire(IInterfaceManager interfaceManager) { /* ... */ }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void Unwire() { }
+}
+```
+
+This module needs **more** through the bridge than WeaponStats does, and each
+accessor is a separate `NoInlining` member returning a primitive or a plain
+record:
+
+```csharp
+[MethodImpl(MethodImplOptions.NoInlining)]
+public int? GetPoints(ulong steamId) => _api is IRanksApi a ? a.GetPoints(steamId) : null;
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+public void SetPoints(ulong steamId, int points, string reason) =>
+    (_api as IRanksApi)?.SetPoints(steamId, points, reason);
+
+// Flattened deliberately: returning RanksPlayerSnapshot would name a contract
+// type in the caller's signature and defeat the isolation.
+[MethodImpl(MethodImplOptions.NoInlining)]
+public PerfCounters? GetCounters(ulong steamId)
+{
+    if (_api is not IRanksApi a || a.GetSnapshot(steamId) is not { } s) return null;
+    return new PerfCounters(s.Kills, s.Deaths, s.Assists, s.RoundWins, s.BombsPlanted, s.BombsDefused);
+}
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+public CoreSettings? GetSettings() =>
+    _api is IRanksApi a && a.GetPointSettings() is { } p
+        ? new CoreSettings(p.UseCoreRankingLogic, p.StartPoints, p.MinPoints, p.MinPlayers, p.WarmupPoints, p.PointsForBots)
+        : null;
+```
+
+`PerfCounters` and `CoreSettings` are module-owned records. **Returning
+`RanksPlayerSnapshot` or `RanksPointSettings` directly would put a contract type
+in a signature outside the bridge**, which is the same JIT hazard one indirection
+further out — and it is the exact mistake the `object?` field is there to
+prevent.
+
+**Audit rule:** grep the *field name* (`_api`, `_module`) across the whole
+plugin, not the type name.
+
+### 2.2 Where things go
+
+| Step | Work |
+|---|---|
+| Constructor | nothing |
+| `Load` | `EloMathSelfCheck.Run()`, config, `Core.Registrator.Register(_tracker)`, core-event subscriptions |
+| `UseSharedInterface` / `OnSharedInterfaceInjected` | acquire through the bridge; `RegisterMigrations(assembly)` |
+| `OnCoreReady` | resolve the table name, read core's settings, run the `UseCoreRankingLogic` check |
+| `OnAllPluginsLoaded` | if `Ranks` is absent, log one ungated warning and stay idle |
+| `Unload` | settle any open match, then unwire |
+
+`RegisterMigrations` goes in the handshake, not `Load` — there is no API in
+`Load` (guide §10.5). Core dedupes on `(assembly, pluginId)`, so the handshake
+re-running on every other plugin's load is harmless.
+
+Table names are resolved in `OnCoreReady` for the same reason.
+
+### 2.3 Handlers outside the plugin class must be registered
+
+`MatchTracker` holds the `[GameEventHandler]` methods, so it is invisible to the
+framework until:
+
+```csharp
+Core.Registrator.Register(_tracker);   // exactly once
+```
+
+Registering twice double-counts every round. Signatures must match the expected
+delegate exactly or the method is silently skipped.
+
+### 2.3a ⚠️ No native access inside an event dispatch
+
+**Never touch native entity accessors synchronously from inside a game-event
+handler, even in `Post` mode.** CS2 can be mid entity-shuffle, and a managed
+`try/catch` does **not** catch the resulting access violation — it bypasses the
+CLR straight to the crash reporter, taking the host down.
+
+So `OnRoundEnd` reads only `e.Winner` and defers; `OnWinPanelMatch` defers
+outright:
+
+```csharp
+public HookResult OnRoundEnd(EventRoundEnd e)
+{
+    var winner = (int)e.Winner;
+    _core.Scheduler.NextTick(() => AccrueRound(winner));
+    return HookResult.Continue;
+}
+```
+
+`OnPlayerTeam` is the deliberate exception: its only native read is the named
+player's own SteamID, whose pointer is stable for the event that names them, and
+deferring risks them being gone by the next tick.
+
+Two further rules follow from the same hazard:
+
+- Guard with `player.IsValid` **and** `player.Controller is { IsValid: true }`.
+  A non-null controller wrapper can sit over a dead pointer, and reading a field
+  through it faults.
+- The match-end watchdog uses `DelayAndRepeatBySeconds(5, 5, …)`, not
+  `RepeatBySeconds`. The latter fires its first callback on the *next* scheduler
+  tick, which lands inside CS2's map-load shuffle — and that callback reads game
+  state.
+
+### 2.4 The `UseCoreRankingLogic` check
+
+```csharp
+protected override void OnCoreReady()
+{
+    if (_bridge.GetSettings() is { UseCoreRankingLogic: true })
+        _logger.LogWarning(
+            "Ranks_EloPoints: core's Rank.UseCoreRankingLogic is true, so core is still awarding " +
+            "points per kill while this module writes a rating over the top. Neither number is " +
+            "meaningful. Set Rank.UseCoreRankingLogic to false in core's config.jsonc.");
+}
+```
+
+Ungated by `DetailedLogging` — it fires once, and it is the only signal between
+a misconfigured server and a ladder full of nonsense. It **warns rather than
+overriding**: core's config belongs to the operator, and silently flipping it
+would be the worse surprise. Same call `Ranks_WeaponStats` makes on its FFA
+mismatch.
+
+### 2.5 Hot reload
+
+`Load(hotReload: true)` runs mid-match with players connected. **Any match in
+progress is abandoned, not adopted** — the per-round accrual it would need was
+never recorded, and reconstructing it from the scoreline would mean inventing
+the per-round expectations. A fresh match session starts at the next round, and
+the partial one pays nobody.
+
+That is the same rule as a map change (features.md §2.1), reached a different
+way.
+
+---
+
+## 3. Configuration
+
+```csharp
+Core.Configuration
+    .InitializeJsonWithModel<EloConfig>("config.jsonc", "EloPoints", true)
+    .Configure(builder =>
+        builder.AddJsonFile(Core.Configuration.GetConfigPath("config.jsonc"), optional: false, reloadOnChange: true));
+
+_config = BindConfig();
+
+_reload = ChangeToken.OnChange(Core.Configuration.Manager.GetReloadToken, () =>
+{
+    var incoming = BindConfig();
+
+    _config = incoming;
+    _tracker?.UpdateConfig(incoming);
+});
+```
+
+Bound off `Core.Configuration.Manager` — the root the framework already owns and
+watches. No `ServiceCollection`, no `IOptionsMonitor` (guide §3).
+
+Validation clamps rather than throwing:
+
+| Key | Rule |
+|---|---|
+| `Rating.Mode` | `Classic` or `RoundAccumulation`; anything else falls back to `RoundAccumulation` with a warning |
+| `Rating.K` | `1..200` |
+| `Rating.PerformanceBonus` | `0..100`; `0` disables the bonus |
+| `Rating.ConfidenceRounds` | `0..100`; `0` disables shrinkage |
+| `Rating.ExpectedRounds` | `1..200` |
+| `Abandon.Penalty` | `>= 0`; `0` disables |
+
+**`Mode` falls back loudly.** An unrecognised string binding to
+`default(RatingMode)` would silently pick whichever member is zero, and the
+operator's typo would look like working software.
+
+### 3.1 Settings read from core, not configured here
+
+`StartPoints`, `MinPoints`, `MinPlayers`, `WarmupPoints` and `PointsForBots`
+come from `GetPointSettings()` on every match settle, never cached at load —
+`GetPointSettings` returns a fresh snapshot per call precisely so it tracks live
+reloads (FR-API-05).
+
+This is FR-MOD-05 rule 3: core applies none of them with `UseCoreRankingLogic`
+off, but they are the operator's stated intent and asking them to set the same
+thing twice is how the two copies drift.
+
+---
+
+## 4. Database
+
+### 4.1 Migration
+
+```csharp
+[Migration(20261026120000)]
+public sealed class M202610261200_Rating : Migration
+{
+    public override void Up() =>
+        Create.Table("ranks_elopoints")
+            .WithColumn("steam_id").AsInt64().NotNullable().PrimaryKey()
+            .WithColumn("rating").AsDecimal(10, 4).NotNullable()
+            .WithColumn("matches").AsInt32().NotNullable().WithDefaultValue(0)
+            .WithColumn("abandons").AsInt32().NotNullable().WithDefaultValue(0)
+            .WithColumn("updated_at").AsDateTime().NotNullable();
+
+    public override void Down() => Delete.Table("ranks_elopoints");
+}
+```
+
+The same four rules as WeaponStats §4.1 apply: the base name carries the
+`ranks_` namespace so FR-DB-03's resolver only adds the operator's affixes; the
+PK is declared inline because MySQL names every primary key `PRIMARY` and a
+`Constraint(...).Exists()` guard is therefore always false; migration ids are
+unique within this assembly only, since the module has its own ledger; and no
+`Execute.Sql`, which has no expression tree for core to rewrite.
+
+**`DECIMAL(10,4)`, not `FLOAT`.** Binary floating point makes the stored value
+depend on accumulation order, so two servers writing the same sequence of deltas
+can disagree in the last digits — and the value is then compared and rounded for
+display. Four decimal places is more than the formula needs and costs nothing.
+
+### 4.2 The upsert is absolute, not additive
+
+The opposite of `Ranks_WeaponStats`, and for a reason worth stating: that module
+holds session *deltas* with no read on connect, so additive is correct there.
+This module reads the current rating, computes a new one, and writes it.
+
+```sql
+-- MySQL / MariaDB
+INSERT INTO {t} (steam_id, rating, matches, abandons, updated_at)
+VALUES (@SteamId, @Rating, 1, @Abandons, @Now)
+ON DUPLICATE KEY UPDATE
+    rating = VALUES(rating),
+    matches = matches + 1,
+    abandons = abandons + VALUES(abandons),
+    updated_at = VALUES(updated_at);
+
+-- PostgreSQL / SQLite
+INSERT INTO {t} (...) VALUES (...)
+ON CONFLICT (steam_id) DO UPDATE SET
+    rating = EXCLUDED.rating,
+    matches = {t}.matches + 1,
+    abandons = {t}.abandons + EXCLUDED.abandons,
+    updated_at = EXCLUDED.updated_at;
+```
+
+`rating` is replaced; the two counters accumulate. Keep `VALUES()` on the MySQL
+branch — 8.0.20 deprecates it for the `AS new` alias, which MariaDB does not
+support at all.
+
+Table names come from `ResolveTableName` at query-build time, never string
+concatenation.
+
+### 4.3 Reading the rating in
+
+A player's rating is needed the moment they enter a match, which may be before
+they have a row. Resolution order:
+
+1. this module's table, read once per player per session and cached on the
+   session;
+2. core's `GetPoints` — covers a server migrating from core scoring, where the
+   accumulated points are the only starting signal there is;
+3. `Rank.StartPoints`.
+
+The read is off-thread and must not block a round boundary. A read still in
+flight when a round ends leaves the session unresolved, and an unresolved player
+is simply left out of the team average rather than averaged in at a guessed
+value. That is deliberate rather than tolerated: a blocking read on the game
+thread is a stall, and one round of a slightly narrower average is invisible
+after shrinkage.
+
+**The continuation marshals back through `Core.Scheduler.NextTick` before it
+touches anything.** The session, core's API and the session registry are all
+game-thread state, and the `await` resumes on the thread pool — applying the
+result inline would race the round handler and could publish `RatingResolved`
+ahead of `Rating`.
+
+### 4.4 Failure handling
+
+A failed write must not lose the rating. The store retries off-thread and merges
+the failed batch back into its own buffer, never into a live session — those
+belong to the game thread (§6).
+
+Log at `Error` with the exception object. This is a data-loss path and is not
+gated behind `DetailedLogging`.
+
+---
+
+## 5. The match state machine
+
+### 5.1 Reading match state safely
+
+```csharp
+// GameRules only exists after world spawn; reading MatchData between maps, during
+// bootup, or once the rules entity has been torn down throws — and some SwiftlyS2
+// builds throw NullReferenceException rather than anything specific.
+private bool TryReadMatch(out MatchSnapshot snapshot)
+{
+    try
+    {
+        ref var m = ref Core.Game.MatchData;
+        snapshot = new MatchSnapshot(m.ActualRoundsPlayed, m.Phase, m.CTScoreTotal, m.TerroristScoreTotal);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        _logger.LogDebug(ex, "MatchData unavailable.");
+        snapshot = default;
+        return false;
+    }
+}
+```
+
+**The broad catch is not defensive padding — it is a production finding** from
+`rampage-plugins-ServerReporter`, which reads the same struct on a heartbeat and
+carries the identical comment. It matters more here than there: this module
+reads at round end and map unload, which is precisely when the rules entity is
+being torn down.
+
+A failed read at a round boundary skips that round's accrual rather than
+guessing. A failed read at settle time falls back to the session's own round
+count.
+
+### 5.2 Boundaries
+
+| Boundary | Signal |
+|---|---|
+| match start | first live round after `Phase` leaves `GAMEPHASE_WARMUP_ROUND`, or `ActualRoundsPlayed` moving backwards |
+| round end | `EventRoundEnd`, filtered by phase |
+| match end | `EventCsWinPanelMatch`, **or** `Phase == GAMEPHASE_MATCH_ENDED` |
+| abandoned | `OnMapUnload`, or `Unload`, with a match still open |
+
+Match end is deliberately double-sourced. The event is primary; the phase poll
+is a backstop, and settling is idempotent per match so firing both is harmless.
+The failure it guards is that *nothing is ever written for any match*, which is
+the one outcome that must not be silent.
+
+Warmup rounds are filtered on `Phase == GAMEPHASE_WARMUP_ROUND` and gated by
+core's `Rank.WarmupPoints`. The phase is a direct signal, so this does not
+depend on inferring warmup from the round counter.
+
+### 5.3 Restart detection
+
+```csharp
+// Source-agnostic: a knife-round plugin, an admin, or a match plugin all look
+// identical from here, and none of them has to be hooked.
+if (snapshot.RoundsPlayed < _lastRoundsPlayed) DiscardMatch("restart");
+
+_lastRoundsPlayed = snapshot.RoundsPlayed;
+```
+
+> **Confirmed on a live server (2026-10-26): `ActualRoundsPlayed` resets on
+> `mp_restartgame`.** The branch above is the whole of restart detection, and a
+> knife round is discarded rather than counted.
+
+Still not covered: a knife round followed by `mp_swapteams` and a continue, with
+no restart at all. That counts one phantom round, accepted deliberately — one
+round in ~24, which shrinkage renders negligible.
+
+`Nm` comes from `ActualRoundsPlayed` at settle time. Mid-match — for a
+participation factor that needs a denominator before the match is over — it
+comes from the `mp_maxrounds` convar, falling back to `Rating.ExpectedRounds`
+only when the convar cannot be read.
+
+---
+
+## 6. Round accumulation
+
+### 6.1 The session
+
+```csharp
+private readonly Dictionary<ulong, MatchSession> _sessions = new();
+```
+
+**A dictionary keyed on SteamID, not the 64-slot array WeaponStats uses.** The
+slot array is faster, and it is wrong here: a session must survive a disconnect
+so a reconnect resumes it (features.md §2.2), and the slot is cleared and
+reissued on disconnect. The access rate justifies it — once per player per round
+rather than once per bullet.
+
+```csharp
+internal sealed class MatchSession
+{
+    public required ulong SteamId { get; init; }
+    public double Rating;            // resolved per §4.3
+    public bool RatingResolved;
+    public int RoundsPresent;
+    public double SumActual;         // Σ S_r
+    public double SumExpected;       // Σ E_r
+    public PerfCounters? StartCounters;
+    public int LastTeam;             // so a departed player can still be attributed at settle
+    public bool Present = true;      // false once disconnected or moved to spectator
+}
+```
+
+All of it is touched only on the game thread. A match boundary resets each
+session in place rather than clearing the dictionary — see §6.3.
+
+### 6.3 Resetting between matches
+
+**Clearing `_sessions` at a match boundary is wrong, and it looks right.**
+Nothing re-adds a session for an already-connected player: `Adopt` runs on
+connect and on hot reload only. So wiping the dictionary after a knife-round
+restart, or after any settle, leaves every connected player sessionless, and the
+entire following match accrues nothing and settles nobody.
+
+`StartFreshMatch()` instead walks the existing sessions and:
+
+- drops the ones marked absent (they have just been settled or have left);
+- zeroes `RoundsPresent`, `SumActual`, `SumExpected`, `LastTeam`;
+- keeps `Rating` / `RatingResolved`, so no database re-read is needed;
+- **re-captures `StartCounters`.**
+
+That last point is a second bug in the same place. `StartCounters` is a *match*
+baseline, and it is first taken on `PlayerDataLoaded` — i.e. at connect. Left
+alone, a player's second match would be scored on counters spanning both, and
+the performance percentile would be meaningless for everyone who stayed.
+
+It deliberately does not touch `_settled`: `Settle` sets that flag and calls
+`StartFreshMatch`, so resetting it there would let the 5-second backstop settle
+the same match repeatedly. `_settled` is cleared by the first accrued round of
+the next match instead.
+
+### 6.2 Per round
+
+```csharp
+[GameEventHandler(HookMode.Post)]
+public HookResult OnRoundEnd(EventRoundEnd e)
+{
+    if (!TryReadMatch(out var m)) return HookResult.Continue;
+    if (m.Phase == GamePhase.GAMEPHASE_WARMUP_ROUND && !_core.WarmupPoints) return HookResult.Continue;
+    if (m.RoundsPlayed < _lastRoundsPlayed) { DiscardMatch("restart"); return HookResult.Continue; }
+
+    var (avgT, avgCt) = TeamAverages();
+
+    foreach (var player in Core.PlayerManager.GetAllPlayers())
+    {
+        if (_sessions.GetValueOrDefault(player.SteamID) is not { Present: true } s) continue;
+
+        var own = player.Controller.TeamNum == (int)Team.T ? avgT : avgCt;
+        var opp = player.Controller.TeamNum == (int)Team.T ? avgCt : avgT;
+
+        s.SumExpected += EloMath.Expected(own, opp);
+        s.SumActual += player.Controller.TeamNum == e.Winner ? 1.0 : 0.0;
+        s.RoundsPresent++;
+    }
+
+    _lastRoundsPlayed = m.RoundsPlayed;
+
+    return HookResult.Continue;
+}
+```
+
+**Team averages are recomputed every round**, which is what makes a team that
+loses a player mid-match be measured against its current strength. It is a pass
+over at most 10 players once per round.
+
+A spectator has no session marked `Present`, so the loop skips them without a
+team check.
+
+### 6.3 Imputing bots and unrated players
+
+```csharp
+// Order matters: own team, then whole match, then the configured seed. Each
+// fallback is only reached when the one above it has no rated player at all.
+private double ImputedRating(int teamNum) =>
+    MeanRatedOn(teamNum) ?? MeanRatedInMatch() ?? _core.StartPoints;
+```
+
+A team with no rated humans makes the match unrated when core's
+`Rank.PointsForBots` is `false` (features.md §3). That check happens once at
+settle time, not per round — a team can legitimately have no rated humans for a
+few rounds and then gain one.
+
+---
+
+## 7. Settling
+
+### 7.1 Order of operations
+
+Fixed, and each step depends on the one before it:
+
+```
+1.  base   = K * (S_adj - E_mean) * (n / Nm)
+2.  base   = clamp(base, -K * E_mean, K * (1 - E_mean))     # envelope
+3.  delta  = base + B * (percentile - 0.5)                  # bonus
+4.  delta  = SignFloor(base, delta)                         # bonus cannot flip base's sign
+5.  delta -= Abandon.Penalty                                # only if absent at match end
+6.  rating = max(rating + delta, MinPoints)
+```
+
+Steps 2 and 4 are both required and neither subsumes the other — features.md
+§1.5 has the worked case the envelope misses.
+
+Step 5 is outside the sign floor on purpose: the penalty is not part of the
+result, and it is allowed to turn a win into a net loss. That is the entire
+point of it.
+
+```csharp
+private static double SignFloor(double base_, double delta) => base_ switch
+{
+    > 0 when delta < Epsilon  => Epsilon,
+    < 0 when delta > -Epsilon => -Epsilon,
+    _ => delta,
+};
+```
+
+`Epsilon` is a constant, not a config key — it is a correctness guard, not a
+tuning knob.
+
+### 7.2 The performance percentile
+
+```
+raw = kills + 0.5*assists - 0.7*deaths + 0.3*roundWins + 2*bombsPlanted + 2*bombsDefused
+```
+
+…over the **match delta** of each counter, then ranked within the match and
+mapped to `[0, 1]`.
+
+Every counter comes from `GetSnapshot` diffed between match start and match end.
+`GetStat` exposes the same numbers but they are lifetime totals, so a long-tenured
+player would score higher on their history rather than on this match.
+
+**Mid-match joiners are snapshotted on `PlayerDataLoaded`**, not at match start —
+that event is the only moment their record is guaranteed resident. A player whose
+start counters were never captured scores at the median (`p = 0.5`), contributing
+no bonus either way, rather than being scored against a zero baseline that would
+read as a perfect game.
+
+Objectives are weighted in because a pure K/D measure pays players to stop
+defusing (features.md §1.4). The coefficients are a starting point and are
+expected to move once there is real data; they live in one `const` block for
+that reason.
+
+### 7.3 Writing
+
+Settling runs on the game thread. Core is updated inline; the database write is
+queued and leaves the thread:
+
+```csharp
+_bridge.SetPoints(steamId, (int)Math.Round(updated), "elopoints.match");
+_bridge.SavePlayer(steamId);
+writes.Add(new RatingWrite(steamId, updated, abandoned));
+// ...
+_ = _store.CommitAsync(writes);     // off-thread from here on
+_sessions.Clear();
+```
+
+`SetPoints` has to be inline because core's API is game-thread state; the DB
+write must not be, because a synchronous write at match end is a stall.
+
+**The module's table is still the authoritative value** (features.md §5) even
+though core is updated first. `CommitAsync` populates the store's cache before
+it queues anything, so a player who had already disconnected — and whom core may
+no longer track, making `SetPoints` a no-op — is reconciled on their next
+`PlayerDataLoaded`:
+
+```csharp
+if (_store.TryGetCached(player.SteamId, out var rating) && (int)Math.Round(rating) != player.Points)
+    Api.SetPoints(player.SteamId, (int)Math.Round(rating), "elopoints.resync");
+```
+
+`SavePlayerAsync` is called explicitly rather than waiting for core's periodic
+pass, per FR-MOD-05 rule 5 — the record is evicted once saved, and the next pass
+may be minutes away.
+
+**Rounding, never truncation.** `(int)rating` would bias every write downward and
+the error would accumulate in one direction forever, which is the whole reason
+the `DECIMAL` column exists.
+
+---
+
+## 8. Purge
+
+```csharp
+protected override void OnPlayersPurged(IReadOnlyList<ulong> steamIds) => _ = _store.PurgeAsync(steamIds);
+```
+
+Core has already removed its own rows by the time this fires, so the module must
+not expect to look the player up.
+
+---
+
+## 9. Self-check
+
+`EloMathSelfCheck.Run()` executes in `Load` before anything else, throwing on
+failure. `EloMath` is pure and names no framework type, so the same assertions
+run in a console harness.
+
+| Assertion | Catches |
+|---|---|
+| `Expected(r, r) == 0.5`; a 400-point gap gives ≈ `0.9091`; `Expected(a,b) + Expected(b,a) == 1` | an inverted sign in the exponent, which is invisible on even teams |
+| Shrinkage with `n = 0` yields `S_adj == E`, giving zero delta | a division that produces `NaN` on an empty session |
+| Shrinkage is monotonic in `n` toward the unshrunk value | an inverted weighting that damps *long* sessions instead of short ones |
+| 13-0 even teams, `c = 10` → `+14.13`; full 13-8 → `+4.03`; join-at-18 4-0 → `+1.36`; 2-round cameo → `+0.40` | any coefficient drift away from the figures published in features.md |
+| A double-counted accrual (`S̄ = 2.0`) still respects the envelope ceiling | the envelope clamp being removed or mis-bounded |
+| `E = 0.95`, win, worst percentile → delta is positive | the sign floor missing, which is the case the envelope does not catch |
+| Abandon penalty always reduces the delta by exactly `Penalty` | the penalty being folded inside the sign floor |
+| Four identical performances all land on the median | ties not sharing a rank, which orders identical play arbitrarily |
+
+> **The envelope assertion needs the corrupted input, not the randomised sweep.**
+> With an actual score in `[0, 1]`, `K(S_adj − E)` already lands inside the
+> envelope algebraically, so the clamp is unreachable on valid data and a sweep
+> over valid data cannot tell whether it is there. It exists to bound an
+> upstream accrual bug — a round credited twice — so it is tested with exactly
+> that. This was found by mutation testing: deleting the clamp passed a 20 000
+> iteration randomised sweep.
+
+Each is mutation-tested before the module is reported working: break the logic,
+confirm the check fails with a message naming the value and the expectation.
+
+Until `EloMath` exists, [`verify-figures.ps1`](verify-figures.ps1) is the
+runnable check standing in for it — it reproduces every figure published in
+[features.md](features.md) and the abandon-threshold table, for any `K`, `c` and
+`Penalty`. It is also what caught the published abandon numbers being wrong,
+so it stays alongside the C# self-check rather than being replaced by it.
+
+---
+
+## 10. Open items
+
+| Item | Blocking? | Note |
+|---|---|---|
+| `EventCsWinPanelMatch` firing on every match configuration | no | phase backstop covers it (§5.2) |
+| Performance coefficients (§7.2) | no | starting values; expected to move on real data |
+| Placement matches | no | deliberately out of scope (features.md §6) |
+| `Abandon.Penalty` does not deter abandonment in the first third of a lopsided match | no | bounded and documented (features.md §2.3); closing it needs `Penalty ≈ K × 0.9` |

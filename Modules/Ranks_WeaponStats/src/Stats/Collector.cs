@@ -1,0 +1,209 @@
+using Microsoft.Extensions.Logging;
+using Ranks.WeaponStats.Config;
+using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.GameEventDefinitions;
+using SwiftlyS2.Shared.GameEvents;
+using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Players;
+
+namespace Ranks.WeaponStats.Stats;
+
+/// <summary>The hot path: three game-event handlers and the slot array they write into.</summary>
+/// <remarks>
+/// Holds the <c>[GameEventHandler]</c> methods, so it is invisible to the framework until it is
+/// passed to <c>Core.Registrator.Register</c> — exactly once. Registering twice double-counts
+/// every shot.
+/// </remarks>
+internal sealed class Collector
+{
+    private const int MaxSlots = 64;
+
+    private readonly ISwiftlyCore _core;
+    private readonly ILogger _logger;
+    private readonly SessionStats?[] _slots = new SessionStats?[MaxSlots];
+
+    /// <remarks>
+    /// A volatile snapshot swapped by the reload handler, not re-bound per access: weapon_fire
+    /// alone runs at roughly 200/second on a busy server.
+    /// </remarks>
+    private volatile WeaponStatsConfig _config;
+
+    public Collector(ISwiftlyCore core, WeaponStatsConfig config, ILogger logger)
+    {
+        _core = core;
+        _config = config;
+        _logger = logger;
+    }
+
+    public void UpdateConfig(WeaponStatsConfig config) => _config = config;
+
+    /// <summary>Starts tracking a player. Bots deliberately never get a session.</summary>
+    /// <remarks>
+    /// A bot therefore never owns a row: its slot stays null and every handler returns on the null
+    /// check it already has. Whether a bot counts as the <em>counterparty</em> is a separate
+    /// question, answered by the two Tracking switches.
+    /// </remarks>
+    public void Adopt(IPlayer player)
+    {
+        if (player.IsFakeClient || (uint)player.Slot >= MaxSlots) return;
+
+        _slots[player.Slot] = new SessionStats { SteamId = player.SteamID };
+    }
+
+    public SessionStats? Release(int slot)
+    {
+        if ((uint)slot >= MaxSlots) return null;
+
+        var stats = _slots[slot];
+        _slots[slot] = null;
+
+        return stats;
+    }
+
+    /// <summary>Detaches every live session's deltas. Game thread only.</summary>
+    public List<StatsDelta> DetachAll()
+    {
+        var batch = new List<StatsDelta>();
+
+        foreach (var session in _slots)
+            if (session?.Detach() is { } delta)
+                batch.Add(delta);
+
+        return batch;
+    }
+
+    /// <summary>Copies one player's unflushed deltas without clearing them. Game thread only.</summary>
+    /// <remarks>
+    /// Scans the slots rather than keeping a SteamID index: at most 64 reference comparisons, run
+    /// once per API query rather than per event, which is far cheaper than a second dictionary the
+    /// hot path would have to maintain.
+    /// </remarks>
+    public StatsDelta? PeekFor(ulong steamId)
+    {
+        foreach (var session in _slots)
+            if (session is not null && session.SteamId == steamId)
+                return session.Peek();
+
+        return null;
+    }
+
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnWeaponFire(EventWeaponFire e)
+    {
+        // No guards at all: there is no victim to test, so neither the bot switches nor the
+        // friendly-fire rule has anything to say about a shot.
+        if (Session(e.UserIdPlayer) is { } stats)
+            stats.For(WeaponNames.Normalize(e.Weapon)).Shots++;
+
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnPlayerHurt(EventPlayerHurt e)
+    {
+        var config = _config;
+        var attacker = e.AttackerPlayer;
+        var victim = e.UserIdPlayer;
+
+        if (IsExcluded(config.Tracking, attacker, victim)) return HookResult.Continue;
+        if (!CountAgainst(config.Tracking, victim)) return HookResult.Continue;
+
+        if (Session(attacker) is not { } stats) return HookResult.Continue;
+
+        // Actual* throughout: DmgHealth is a short and Hitgroup a byte, so a server granting more
+        // than 255 HP silently corrupts the narrow ones.
+        var damage = e.ActualDmgHealth;
+        var counters = stats.For(WeaponNames.Normalize(e.Weapon));
+
+        counters.Hits++;
+        counters.Damage += damage;
+
+        // An out-of-range hitgroup is simply not counted — there is no hitgroup to attribute it
+        // to, and this table has no reconciliation invariant against core, which stores no hitbox
+        // data at all. The weapon row for the same event is still recorded above.
+        var hitGroup = (int)e.ActualHitGroup;
+
+        if ((uint)hitGroup < SessionStats.HitGroupSlots)
+        {
+            stats.HitGroupHits[hitGroup]++;
+            stats.HitGroupDamage[hitGroup] += damage;
+        }
+
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnPlayerDeath(EventPlayerDeath e)
+    {
+        // Read once at the top: a reload landing between the kill half and the death half would
+        // otherwise mix old and new settings within a single event.
+        var config = _config;
+        var attacker = e.AttackerPlayer;
+        var victim = e.UserIdPlayer;
+        var weapon = WeaponNames.Normalize(e.Weapon);
+
+        if (!IsExcluded(config.Tracking, attacker, victim) && CountAgainst(config.Tracking, victim) && Session(attacker) is { } killer)
+        {
+            var counters = killer.For(weapon);
+            counters.Kills++;
+
+            if (e.Headshot) counters.Headshots++;
+        }
+
+        // Deaths deliberately skip IsExcluded: being killed by a teammate is still a death, and
+        // core's ranks_players.deaths counts every death whatever killed the player.
+        if (CountFrom(config.Tracking, attacker) && Session(victim) is { } died)
+            died.For(weapon).Deaths++;
+
+        return HookResult.Continue;
+    }
+
+    private SessionStats? Session(IPlayer? player) =>
+        player is not null && (uint)player.Slot < MaxSlots ? _slots[player.Slot] : null;
+
+    /// <remarks>
+    /// Friendly fire and self damage are dropped before the bot switches are consulted. Self
+    /// damage is never combat performance under any setting, so it is not configurable; same-team
+    /// is the operator's call.
+    /// </remarks>
+    private bool IsExcluded(TrackingConfig tracking, IPlayer? attacker, IPlayer? victim)
+    {
+        // World damage is neither self damage nor friendly fire, and must keep counting.
+        if (attacker is null || victim is null) return false;
+
+        if (attacker.Slot == victim.Slot) return true;
+
+        if (tracking.CountFriendlyFire) return false;
+
+        return SameTeam(attacker, victim);
+    }
+
+    /// <remarks>
+    /// Guarded because it reaches into game memory on a hit-rate path; an unknown team falls
+    /// through to counting, which is the safe bias for a module whose counters must reconcile.
+    /// </remarks>
+    private bool SameTeam(IPlayer attacker, IPlayer victim)
+    {
+        try
+        {
+            var attackerTeam = attacker.Controller?.TeamNum ?? 0;
+            var victimTeam = victim.Controller?.TeamNum ?? 0;
+
+            return attackerTeam is 2 or 3 && attackerTeam == victimTeam;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Ranks_WeaponStats: could not read team numbers; counting the event.");
+            return false;
+        }
+    }
+
+    /// <summary>A null counterparty is world damage, not a bot, and must keep counting.</summary>
+    private static bool IsBot(IPlayer? player) => player is { IsFakeClient: true };
+
+    private static bool CountAgainst(TrackingConfig tracking, IPlayer? victim) =>
+        tracking.CountAgainstBots || !IsBot(victim);
+
+    private static bool CountFrom(TrackingConfig tracking, IPlayer? attacker) =>
+        tracking.CountFromBots || !IsBot(attacker);
+}
