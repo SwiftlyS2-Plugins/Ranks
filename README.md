@@ -20,6 +20,16 @@ A module can read points and stats, react to point and rank changes, claim a kil
 prices it, override the scoreboard, and hand core its own migrations to run. Four official modules
 ship alongside core, and writing your own touches nothing in core.
 
+## ✨ Features
+
+- 🏆 **Points and ranks** - a configurable ladder, priced per event, with VIP and dynamic multipliers
+- 📊 **Gameplay stats** - kills, deaths, assists, round and match results, bomb plants and defuses
+- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, Danger Zone, or a Custom mode for replacement icon sets, plus rank clan tags
+- 🗄️ **MySQL, MariaDB, PostgreSQL or SQLite** - one connection, shared with every module
+- 🧩 **Module API** - other plugins read ranks, react to changes, and own tables core migrates for them
+- 🔁 **Live config reload** - points, ladder and scoreboard changes apply on save; only command names and table affixes need a restart
+- 🏷️ **Multi-server friendly** - table prefixes and suffixes let several servers share one database
+
 ## 🚀 Getting Started
 
 | Guide | Description |
@@ -46,13 +56,28 @@ ship alongside core, and writing your own touches nothing in core.
 | **[Ranks_CustomCombos](../../wiki/Module-CustomCombos)** | additive | Operator-defined kill combinations, with `!combos` |
 | **[Ranks_Prestige](../../wiki/Module-Prestige)** | display | Prestige levels as a virtual point deduction, with `!prestige` |
 
-See **[Modules](../../wiki/Modules)** for the four kinds and which combinations are safe.
+Only the two scoring kinds can conflict. An **additive** module adds points alongside core's
+scoring. An **absolute** module replaces it entirely — set `Rank.UseCoreRankingLogic` to `false`
+and the module becomes the only thing writing points, while core keeps persistence, the ladder,
+the scoreboard and the commands.
+
+> [!WARNING]
+> **At most one absolute module may run at a time, and core does not police this.** Two of them
+> overwrite each other's rating with no error anywhere.
+
+A **data** module only records, and a **display** module only changes what the scoreboard shows;
+neither writes points, so both compose with anything.
+
+Modules that publish a read API of their own ship their own contract assembly, from their own
+directory — adding one never touches core.
+
+See **[Modules](../../wiki/Modules)** for which combinations are safe.
 
 ## 📚 Documentation
 
 | Topic | Description |
 |-------|-------------|
-| **[Features](../../wiki/Features)** | What the plugin can do |
+| **[Features](../../wiki/Features)** | The full list, and what core deliberately does not do |
 | **[API Reference](../../wiki/API-Reference)** | Every member of `IRanksApi` |
 | **[API Integration](../../wiki/API-Integration)** | Build a module |
 | **[Building](../../wiki/Building)** | Build from source and release |
