@@ -1,4 +1,4 @@
-namespace Ranks.Modules.Contract;
+namespace Ranks.EloPoints.Contract;
 
 /// <summary>One player's Elo standing.</summary>
 /// <remarks>
@@ -24,7 +24,9 @@ public sealed record EloMatchResult(
 
 /// <summary>Read access to <c>Ranks_EloPoints</c>'s ratings.</summary>
 /// <remarks>
-/// Additive only after 1.0 — see <see cref="IWeaponStatsApi"/>.
+/// Additive only after 1.0, for the same reason as <c>Ranks.Contract</c>: there is no package
+/// registry and therefore no version negotiation, so a renamed or re-signed member is a
+/// <c>MissingMethodException</c> at call time rather than a build error anyone sees.
 ///
 /// Unlike WeaponStats there is no unflushed-delta problem to solve: a rating is written once, at
 /// match end, so the stored value is always current. A match in progress is deliberately not

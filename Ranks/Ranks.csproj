@@ -39,11 +39,6 @@
          binds to that instance. A second copy beside Ranks.dll gives IRanksApi two Type identities
          and TryGetSharedInterface silently stops matching (FR-API-00). -->
     <ProjectReference Include="../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
-
-    <!-- Referenced only for build ordering, so CopyContract can ship it: core never compiles
-         against the module contracts. ReferenceOutputAssembly=false keeps it off the compile. -->
-    <ProjectReference Include="../Modules/Ranks.Modules.Contract/Ranks.Modules.Contract.csproj"
-                      Private="false" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -78,32 +73,24 @@
        project evaluation, so a glob ships nothing from a clean checkout and fails only at runtime
        with a ReflectionTypeLoadException (guide §9.1).
 
-       Both contracts ship from here because there must be exactly one copy of each on a server:
-       two copies give an interface two Type identities and TryGetSharedInterface silently stops
-       matching. Core does not use Ranks.Modules.Contract itself — it is the only component
-       guaranteed present for every module, which makes it the only correct place to ship it. -->
+       Only core's own contract ships from here. A module that publishes an API owns and ships its
+       own contract, so adding one never touches this project. -->
   <Target Name="CopyContract" AfterTargets="Build">
     <PropertyGroup>
       <_ContractDll>$(MSBuildThisFileDirectory)../Ranks.Contract/build/$(TargetFramework)/Ranks.Contract.dll</_ContractDll>
-      <_ModulesContractDll>$(MSBuildThisFileDirectory)../Modules/Ranks.Modules.Contract/build/$(TargetFramework)/Ranks.Modules.Contract.dll</_ModulesContractDll>
     </PropertyGroup>
     <Error Condition="!Exists('$(_ContractDll)')"
            Text="CopyContract: $(_ContractDll) is missing. Build Ranks.Contract first." />
-    <Error Condition="!Exists('$(_ModulesContractDll)')"
-           Text="CopyContract: $(_ModulesContractDll) is missing. Build Ranks.Modules.Contract first." />
-    <Copy SourceFiles="$(_ContractDll);$(_ModulesContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_ContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyContractToPublish" AfterTargets="Publish">
     <PropertyGroup>
       <_ContractDll>$(MSBuildThisFileDirectory)../Ranks.Contract/build/$(TargetFramework)/Ranks.Contract.dll</_ContractDll>
-      <_ModulesContractDll>$(MSBuildThisFileDirectory)../Modules/Ranks.Modules.Contract/build/$(TargetFramework)/Ranks.Modules.Contract.dll</_ModulesContractDll>
     </PropertyGroup>
     <Error Condition="!Exists('$(_ContractDll)')"
            Text="CopyContractToPublish: $(_ContractDll) is missing. Build Ranks.Contract first." />
-    <Error Condition="!Exists('$(_ModulesContractDll)')"
-           Text="CopyContractToPublish: $(_ModulesContractDll) is missing. Build Ranks.Modules.Contract first." />
-    <Copy SourceFiles="$(_ContractDll);$(_ModulesContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_ContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CreateZip" AfterTargets="Publish">

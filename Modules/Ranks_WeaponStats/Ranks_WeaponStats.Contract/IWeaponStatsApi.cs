@@ -1,4 +1,4 @@
-namespace Ranks.Modules.Contract;
+namespace Ranks.WeaponStats.Contract;
 
 /// <summary>One player's lifetime totals for a single weapon.</summary>
 /// <remarks>

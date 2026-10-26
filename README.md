@@ -1,6 +1,6 @@
 <div align="center">
   <h1><strong>Ranks</strong></h1>
-  <p>Points, ranks and lifetime statistics for CS2 — with a module API other plugins build on.</p>
+  <p>Points, ranks and gameplay statistics for CS2 — with a module API other plugins build on.</p>
 </div>
 
 <p align="center">
@@ -15,11 +15,11 @@
 ## Features
 
 - 🏆 **Points and ranks** - a configurable ladder, priced per event, with VIP and dynamic multipliers
-- 📊 **Lifetime stats** - kills, deaths, assists, round and match results, bomb plants and defuses
-- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman or Danger Zone, plus clan tags
+- 📊 **Gameplay stats** - kills, deaths, assists, round and match results, bomb plants and defuses
+- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, Danger Zone or Custom ranks, plus ranks clan tags
 - 🗄️ **MySQL, PostgreSQL or SQLite** - one connection, shared with every module
 - 🧩 **Module API** - other plugins read ranks, react to changes, and own tables core migrates for them
-- 🔁 **Live config reload** - prices, gates and multipliers apply on save
+- 🔁 **Live config reload** - all configuration changes apply on save
 - 🏷️ **Multi-server friendly** - table prefixes and suffixes let several servers share one database
 
 ---
@@ -207,8 +207,8 @@ commands. At most one absolute module may run at a time; core does not police th
 | [Ranks_WeaponStats](Modules/Ranks_WeaponStats) | data | Per-weapon and per-hitbox statistics, with `!weaponstats` and `!hitstats` |
 | [Ranks_EloPoints](Modules/Ranks_EloPoints) | absolute | Faceit-style Elo rating in place of per-kill scoring |
 
-Modules that publish a read API of their own do so through `Ranks.Modules.Contract`, which ships
-alongside `Ranks.Contract` in `resources/exports/`.
+Modules that publish a read API of their own ship their own contract assembly, from their own
+directory — adding one never touches core.
 
 ---
 

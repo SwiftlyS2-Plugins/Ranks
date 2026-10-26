@@ -30,10 +30,15 @@
          (FR-API-00). -->
     <ProjectReference Include="../../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
 
-    <!-- Same single-copy rule. Unlike Ranks.Contract this one is a HARD dependency: this module
-         publishes IWeaponStatsApi from it, so it cannot degrade to a no-op without it. Core ships
-         the single copy in resources/exports, and this module already cannot run without core. -->
-    <ProjectReference Include="../Ranks.Modules.Contract/Ranks.Modules.Contract.csproj" Private="false" />
+    <!-- Same single-copy rule, but this module ships the copy itself (CopyContract below): it owns
+         this contract, so no other component is guaranteed to be installed to ship it. -->
+    <ProjectReference Include="Ranks_WeaponStats.Contract/Ranks_WeaponStats.Contract.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The contract lives inside this project's directory, so the default glob would compile its
+         sources into the plugin on top of referencing the assembly. -->
+    <Compile Remove="Ranks_WeaponStats.Contract/**/*.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -41,5 +46,26 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- Resolved inside a target rather than an item glob: the contract DLL does not exist during
+       project evaluation, so a glob ships nothing from a clean checkout and fails only at runtime
+       with a ReflectionTypeLoadException. -->
+  <Target Name="CopyContract" AfterTargets="Build">
+    <PropertyGroup>
+      <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_WeaponStats.Contract/build/$(TargetFramework)/Ranks_WeaponStats.Contract.dll</_ApiContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ApiContractDll)')"
+           Text="CopyContract: $(_ApiContractDll) is missing. Build Ranks_WeaponStats.Contract first." />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyContractToPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_WeaponStats.Contract/build/$(TargetFramework)/Ranks_WeaponStats.Contract.dll</_ApiContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ApiContractDll)')"
+           Text="CopyContractToPublish: $(_ApiContractDll) is missing. Build Ranks_WeaponStats.Contract first." />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

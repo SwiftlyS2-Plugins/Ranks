@@ -5,7 +5,7 @@ using Ranks.EloPoints.Api;
 using Ranks.EloPoints.Config;
 using Ranks.EloPoints.Match;
 using Ranks.EloPoints.Rating;
-using Ranks.Modules.Contract;
+using Ranks.EloPoints.Contract;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Plugins;

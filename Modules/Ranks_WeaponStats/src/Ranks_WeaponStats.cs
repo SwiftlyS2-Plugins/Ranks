@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Extensions.Logging;
-using Ranks.Modules.Contract;
+using Ranks.WeaponStats.Contract;
 using Ranks.WeaponStats.Api;
 using Ranks.WeaponStats.Commands;
 using Ranks.WeaponStats.Config;

@@ -2,7 +2,7 @@ using System.Data;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Ranks.EloPoints.Match;
-using Ranks.Modules.Contract;
+using Ranks.EloPoints.Contract;
 using SwiftlyS2.Shared;
 
 namespace Ranks.EloPoints.Api;

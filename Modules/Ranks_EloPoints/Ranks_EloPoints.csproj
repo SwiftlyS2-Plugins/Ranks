@@ -30,16 +30,17 @@
          (FR-API-00). -->
     <ProjectReference Include="../../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
 
-    <!-- Same single-copy rule, but a HARD dependency: this module publishes IEloPointsApi from it.
-         Core ships the single copy in resources/exports. -->
-    <ProjectReference Include="../Ranks.Modules.Contract/Ranks.Modules.Contract.csproj" Private="false" />
+    <!-- Same single-copy rule, but this module ships the copy itself (CopyContract below): it owns
+         this contract, so no other component is guaranteed to be installed to ship it. -->
+    <ProjectReference Include="Ranks_EloPoints.Contract/Ranks_EloPoints.Contract.csproj" Private="false" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The self-check harness is a throwaway console app that links three of this module's
          source files; compiling its Program.cs into the plugin would be an error waiting on a
-         glob change. -->
+         glob change. The contract sits inside this directory for the same reason. -->
     <Compile Remove=".selfcheck/**/*.cs" />
+    <Compile Remove="Ranks_EloPoints.Contract/**/*.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -47,5 +48,26 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- Resolved inside a target rather than an item glob: the contract DLL does not exist during
+       project evaluation, so a glob ships nothing from a clean checkout and fails only at runtime
+       with a ReflectionTypeLoadException. -->
+  <Target Name="CopyContract" AfterTargets="Build">
+    <PropertyGroup>
+      <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_EloPoints.Contract/build/$(TargetFramework)/Ranks_EloPoints.Contract.dll</_ApiContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ApiContractDll)')"
+           Text="CopyContract: $(_ApiContractDll) is missing. Build Ranks_EloPoints.Contract first." />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyContractToPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_EloPoints.Contract/build/$(TargetFramework)/Ranks_EloPoints.Contract.dll</_ApiContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ApiContractDll)')"
+           Text="CopyContractToPublish: $(_ApiContractDll) is missing. Build Ranks_EloPoints.Contract first." />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

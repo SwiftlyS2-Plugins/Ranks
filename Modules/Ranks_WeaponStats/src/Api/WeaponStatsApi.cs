@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging;
-using Ranks.Modules.Contract;
+using Ranks.WeaponStats.Contract;
 using Ranks.WeaponStats.Stats;
 using SwiftlyS2.Shared;
 
@@ -9,8 +9,7 @@ namespace Ranks.WeaponStats.Api;
 /// <remarks>
 /// Unlike <see cref="RanksBridge"/> this names its contract without any JIT isolation, and that is
 /// correct: a provider hard-requires the assembly it publishes from, exactly as core does with
-/// Ranks.Contract. Ranks.Modules.Contract.dll ships in core's resources/exports, so it is present
-/// whenever this module is — the module already cannot run without core.
+/// Ranks.Contract. This module ships that assembly itself, so it is present whenever the module is.
 /// </remarks>
 internal sealed class WeaponStatsApi : IWeaponStatsApi
 {
