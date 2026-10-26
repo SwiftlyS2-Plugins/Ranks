@@ -24,6 +24,36 @@
 
 ---
 
+## Modules
+
+Core publishes `IRanksApi` as a SwiftlyS2 shared interface. A module can read points and stats,
+subscribe to point and rank changes, share core's database connection, and hand core its own
+migrations to run. Modules own their tables; core only runs the migrations.
+
+| Module | Kind | What it adds |
+|--------|------|--------------|
+| [Ranks_WeaponStats](Modules/Ranks_WeaponStats) | data | Per-weapon and per-hitbox statistics, with `!weaponstats` |
+| [Ranks_EloPoints](Modules/Ranks_EloPoints) | absolute | Faceit-style Elo rating in place of per-kill scoring |
+| [Ranks_CustomCombos](Modules/Ranks_CustomCombos) | additive | Operator-defined kill combinations, with `!combos` |
+| [Ranks_Prestige](Modules/Ranks_Prestige) | display | Prestige levels as a virtual point deduction, with `!prestige` |
+
+Only the two scoring kinds can conflict. An **additive** module adds points alongside core's
+scoring. An **absolute** module replaces it entirely — set `Rank.UseCoreRankingLogic` to `false`
+and the module becomes the only thing writing points, while core keeps persistence, the ladder,
+the scoreboard and the commands.
+
+> [!WARNING]
+> **At most one absolute module may run at a time, and core does not police this.** Two of them
+> overwrite each other's rating with no error anywhere.
+
+A **data** module only records, and a **display** module only changes what the scoreboard shows;
+neither writes points, so both compose with anything.
+
+Modules that publish a read API of their own ship their own contract assembly, from their own
+directory — adding one never touches core.
+
+---
+
 ## Requirements
 
 - SwiftlyS2
@@ -194,29 +224,6 @@ exceptions are `WarmupPoints` and `PointsForBots`, which discard the death entir
 Records live in memory while a player is connected and are written every `SaveIntervalSeconds`,
 on disconnect, and on map change. The in-memory record is authoritative, so core writes absolute
 values rather than deltas.
-
-**Modules**
-
-Core publishes `IRanksApi` as a SwiftlyS2 shared interface. A module can read points and stats,
-subscribe to point and rank changes, share core's database connection, and hand core its own
-migrations to run. Modules own their tables; core only runs the migrations.
-
-Two kinds exist. An **additive** module adds points alongside core's scoring. An **absolute**
-module replaces it entirely — set `Rank.UseCoreRankingLogic` to `false` and the module becomes the
-only thing writing points, while core keeps persistence, the ladder, the scoreboard and the
-commands. At most one absolute module may run at a time; core does not police this.
-
-### Official Modules
-
-| Module | Kind | What it adds |
-|--------|------|--------------|
-| [Ranks_WeaponStats](Modules/Ranks_WeaponStats) | data | Per-weapon and per-hitbox statistics, with `!weaponstats` |
-| [Ranks_EloPoints](Modules/Ranks_EloPoints) | absolute | Faceit-style Elo rating in place of per-kill scoring |
-| [Ranks_CustomCombos](Modules/Ranks_CustomCombos) | additive | Operator-defined kill combinations, with `!combos` |
-| [Ranks_Prestige](Modules/Ranks_Prestige) | display | Prestige levels as a virtual point deduction, with `!prestige` |
-
-Modules that publish a read API of their own ship their own contract assembly, from their own
-directory — adding one never touches core.
 
 ---
 
