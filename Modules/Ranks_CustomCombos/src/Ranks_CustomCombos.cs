@@ -58,7 +58,7 @@ public sealed class RanksCustomCombos : BasePlugin
         _bridge = new RanksBridge(Core, _writer, _counters, matcher, _config.SuppressCoreAwards, _logger);
         _bridge.CoreReady += OnRanksReady;
 
-        _rounds = new RoundWatcher(() => _bridge.ResetRound());
+        _rounds = new RoundWatcher(() => { if (_bridge.IsAvailable) _bridge.ResetRound(); });
 
         // Exactly once. Registering twice re-arms first_blood mid-round.
         Core.Registrator.Register(_rounds);
@@ -73,9 +73,27 @@ public sealed class RanksCustomCombos : BasePlugin
     /// Acquired here rather than in Load: the shared interface does not exist yet in Load, which
     /// is also why RegisterMigrations cannot live there.
     /// </remarks>
-    public override void UseSharedInterface(IInterfaceManager interfaceManager) => _bridge.TryAcquire(interfaceManager);
+    public override void UseSharedInterface(IInterfaceManager interfaceManager) => Acquire(interfaceManager);
 
-    public override void OnSharedInterfaceInjected(IInterfaceManager interfaceManager) => _bridge.TryAcquire(interfaceManager);
+    public override void OnSharedInterfaceInjected(IInterfaceManager interfaceManager) => Acquire(interfaceManager);
+
+    /// <remarks>
+    /// The catch has to be here rather than inside the bridge. A missing Ranks.Contract.dll fails
+    /// when the CLR JITs TryAcquire, which surfaces in this frame before the bridge's own catch can
+    /// run — so a catch inside it would never see this. Reported at Debug because OnAllPluginsLoaded
+    /// owns the operator-facing message.
+    /// </remarks>
+    private void Acquire(IInterfaceManager interfaceManager)
+    {
+        try
+        {
+            _bridge.TryAcquire(interfaceManager);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_CustomCombos: the Ranks contract could not be loaded.");
+        }
+    }
 
     /// <remarks>
     /// Published unconditionally, and without the JIT isolation the Ranks API needs: this module
@@ -119,7 +137,17 @@ public sealed class RanksCustomCombos : BasePlugin
 
         FlushNow();
 
-        _bridge?.Unwire();
+        // Same JIT hazard as Acquire: Unwire names contract types, so a missing Ranks.Contract.dll
+        // throws into this frame rather than into Unwire's own body.
+        try
+        {
+            _bridge?.Unwire();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_CustomCombos: the Ranks contract could not be unwired.");
+        }
+
         _reload?.Dispose();
     }
 
@@ -191,7 +219,7 @@ public sealed class RanksCustomCombos : BasePlugin
 
             // Polled rather than read per kill: GetPointSettings builds a record and a dictionary,
             // and the arbiter runs inside core's award path.
-            _bridge.RefreshBotPolicy();
+            if (_bridge.IsAvailable) _bridge.RefreshBotPolicy();
         });
     }
 

@@ -85,24 +85,22 @@ internal sealed class RanksBridge
     {
         try
         {
-            if (!interfaceManager.HasSharedInterface(IRanksApi.InterfaceKey))
+            // Fail-closed on the miss: leaving a stale reference behind would point at a disposed
+            // provider after the next handshake rebuild.
+            if (!interfaceManager.TryGetSharedInterface<IRanksApi>(IRanksApi.InterfaceKey, out var api) || api is null)
             {
-                // Fail-closed rather than an early return: leaving a stale reference behind would
-                // point at a disposed provider after the next handshake rebuild.
                 _api = null;
                 IsAvailable = false;
 
                 return false;
             }
 
-            var api = interfaceManager.GetSharedInterface<IRanksApi>(IRanksApi.InterfaceKey);
-
             _api = api;
-            IsAvailable = api is not null;
+            IsAvailable = true;
 
-            if (api is not null) Attach(api);
+            Attach(api);
 
-            return IsAvailable;
+            return true;
         }
         catch (Exception ex)
         {

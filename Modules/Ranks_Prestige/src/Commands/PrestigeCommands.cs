@@ -89,6 +89,14 @@ internal sealed class PrestigeCommands
             return;
         }
 
+        // IsAvailable is a plain bool, so reading it resolves nothing. Without this the first
+        // !prestige on a server with no Ranks installed JITs StandingFor and throws here.
+        if (!_bridge.IsAvailable)
+        {
+            player.SendChat(_core.Localizer["error.unavailable"]);
+            return;
+        }
+
         if (_bridge.StandingFor(player) is not { } standing)
         {
             player.SendChat(_core.Localizer["error.unavailable"]);

@@ -57,13 +57,35 @@ public sealed class RanksPrestige : BasePlugin
 
         // Before the reload token: Unwire clears every live overlay, and a reload firing midway
         // would hand the bridge a ladder it is in the middle of tearing down.
-        _bridge?.Unwire();
+        // Guarded for the same JIT hazard as Acquire: Unwire names contract types, so a missing
+        // Ranks.Contract.dll throws into this frame rather than into Unwire's own body.
+        try
+        {
+            _bridge?.Unwire();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_Prestige: the Ranks contract could not be unwired.");
+        }
+
         _reload?.Dispose();
     }
 
+    /// <remarks>
+    /// The catch has to be here rather than inside the bridge. A missing Ranks.Contract.dll fails
+    /// when the CLR JITs TryAcquire, which surfaces in this frame before the bridge's own catch can
+    /// run — so a catch inside it would never see this.
+    /// </remarks>
     private void Acquire(IInterfaceManager interfaceManager)
     {
-        if (_bridge.TryAcquire(interfaceManager)) return;
+        try
+        {
+            if (_bridge.TryAcquire(interfaceManager)) return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_Prestige: the Ranks contract could not be loaded.");
+        }
 
         _logger.LogWarning(
             "Ranks_Prestige: the Ranks plugin is not present, so this module is idle. " +

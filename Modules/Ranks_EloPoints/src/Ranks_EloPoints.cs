@@ -68,9 +68,27 @@ public sealed class RanksEloPoints : BasePlugin
     /// Acquired here rather than in Load: the shared interface does not exist yet in Load, which
     /// is also why RegisterMigrations cannot live there.
     /// </remarks>
-    public override void UseSharedInterface(IInterfaceManager interfaceManager) => _bridge.TryAcquire(interfaceManager);
+    public override void UseSharedInterface(IInterfaceManager interfaceManager) => Acquire(interfaceManager);
 
-    public override void OnSharedInterfaceInjected(IInterfaceManager interfaceManager) => _bridge.TryAcquire(interfaceManager);
+    public override void OnSharedInterfaceInjected(IInterfaceManager interfaceManager) => Acquire(interfaceManager);
+
+    /// <remarks>
+    /// The catch has to be here rather than inside the bridge. A missing Ranks.Contract.dll fails
+    /// when the CLR JITs TryAcquire, which surfaces in this frame before the bridge's own catch can
+    /// run — so a catch inside it would never see this. Reported at Debug because OnAllPluginsLoaded
+    /// owns the operator-facing message.
+    /// </remarks>
+    private void Acquire(IInterfaceManager interfaceManager)
+    {
+        try
+        {
+            _bridge.TryAcquire(interfaceManager);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_EloPoints: the Ranks contract could not be loaded.");
+        }
+    }
 
     /// <remarks>
     /// Published unconditionally, and without the JIT isolation the Ranks API needs: this module
@@ -104,7 +122,17 @@ public sealed class RanksEloPoints : BasePlugin
 
         _tracker?.DiscardMatch("the plugin is unloading");
 
-        _bridge?.Unwire();
+        // Same JIT hazard as Acquire: Unwire names contract types, so a missing Ranks.Contract.dll
+        // throws into this frame rather than into Unwire's own body.
+        try
+        {
+            _bridge?.Unwire();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_EloPoints: the Ranks contract could not be unwired.");
+        }
+
         _reload?.Dispose();
     }
 
