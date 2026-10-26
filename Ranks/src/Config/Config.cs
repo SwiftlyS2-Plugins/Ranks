@@ -129,6 +129,16 @@ public sealed class PointsOptions
     public bool KillstreakResetOnRoundEnd { get; set; } = true;
 
     public bool ShowPlayerNames { get; set; } = false;
+
+    public bool KillStreaksEnabled { get; set; } = true;
+
+    /// <remarks>Buffers the per-action lines and emits one aggregated line at round end instead.</remarks>
+    public bool RoundEndSummary { get; set; } = false;
+
+    /// <remarks>The server default; a player overrides it for themselves with <c>!togglepointmsg</c>.</remarks>
+    public bool ShowPointMessages { get; set; } = true;
+
+    public bool ShowRankChangeMessages { get; set; } = true;
 }
 
 public sealed class VipOptions
@@ -149,12 +159,4 @@ public sealed class GeneralOptions
     /// never suppressed by it.
     /// </remarks>
     public bool DetailedLogging { get; set; } = false;
-
-    public bool KillStreaksEnabled { get; set; } = true;
-
-    public bool RoundEndSummary { get; set; } = false;
-
-    public bool ShowPointMessages { get; set; } = true;
-
-    public bool ShowRankChangeMessages { get; set; } = true;
 }

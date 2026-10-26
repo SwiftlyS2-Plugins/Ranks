@@ -815,7 +815,7 @@ moment, and the recipients are each team's `PlayerControllers`.
 
 ### FR-PTS-07 — Killstreaks
 
-Opt-in per-round kill accumulation (`General.KillStreaksEnabled`, default
+Opt-in per-round kill accumulation (`Points.KillStreaksEnabled`, default
 `true`). **Eleven tiers**, covering 2 through 12-or-more kills, each a
 `core.streak_*` event so they are tunable like any other.
 `Points.SecondsBetweenKills` (`0` = no time limit) bounds the window; streaks
@@ -844,8 +844,8 @@ system inside core is not the answer.
 
 | Setting | Behaviour |
 |---|---|
-| `General.ShowPointMessages` (default `true`) | Per-action chat lines. |
-| `General.RoundEndSummary` (default `false`) | Buffer per-action lines and emit one aggregated summary at round end instead. |
+| `Points.ShowPointMessages` (default `true`) | Per-action chat lines. |
+| `Points.RoundEndSummary` (default `false`) | Buffer per-action lines and emit one aggregated summary at round end instead. |
 | `Points.ShowPlayerNames` (default `false`) | Include killer/victim names in point lines. |
 | Per-player override | `!togglepointmsg`, persisted in `ranks_settings`. |
 
@@ -968,7 +968,7 @@ so the number carries the distinction indefinitely while the colour does not.
 
 ### FR-RNK-02 — Rank change
 
-Crossing a threshold emits a chat notification (`General.ShowRankChangeMessages`,
+Crossing a threshold emits a chat notification (`Points.ShowRankChangeMessages`,
 default `true`) and raises `RankChanged` on the API. Deranks are announced the
 same way.
 
@@ -1927,7 +1927,7 @@ module from reimplementing core:
 | `MinPlayers`, `WarmupPoints`, `PointsForBots`, `FfaMode` | all four, from `GetPointSettings` |
 | VIP multiplier and flags | `VipMultiplier`, `VipFlags` |
 | Single away-from-zero rounding | the whole rounding rule |
-| `General.ShowPointMessages` and the per-player `!togglepointmsg` preference | **impossible** — the per-player flag is not on `IRanksApi` |
+| `Points.ShowPointMessages` and the per-player `!togglepointmsg` preference | **impossible** — the per-player flag is not on `IRanksApi` |
 | `RoundEndSummary` batching | **impossible** — the buffer is core-internal |
 
 The last two rows are why an arbiter must not print its own chat line: it would

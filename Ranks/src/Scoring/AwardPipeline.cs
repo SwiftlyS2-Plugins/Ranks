@@ -268,10 +268,10 @@ internal sealed class AwardPipeline
 
     private void ReportPoints(RanksConfig config, PlayerRecord record, int delta, string reason, ulong? counterparty, string? displayText = null)
     {
-        if (!config.General.ShowPointMessages || !record.ShowPointMessages) return;
+        if (!config.Points.ShowPointMessages || !record.ShowPointMessages) return;
 
         // Buffered rather than sent, so a busy round produces one line instead of forty.
-        if (config.General.RoundEndSummary)
+        if (config.Points.RoundEndSummary)
         {
             record.PendingSummaryPoints += delta;
             return;
@@ -322,7 +322,7 @@ internal sealed class AwardPipeline
             tiers[oldIndex].Name, tiers[record.RankIndex].Name,
             oldIndex, record.RankIndex, promoted));
 
-        if (!config.General.ShowRankChangeMessages) return;
+        if (!config.Points.ShowRankChangeMessages) return;
 
         var player = FindPlayer(record.SteamId);
         if (player is null) return;
@@ -334,7 +334,7 @@ internal sealed class AwardPipeline
     /// <summary>Flushes buffered point lines at round end (FR-PTS-08).</summary>
     public void FlushRoundSummary()
     {
-        if (!_config.Current.General.RoundEndSummary) return;
+        if (!_config.Current.Points.RoundEndSummary) return;
 
         foreach (var record in _registry.All)
         {

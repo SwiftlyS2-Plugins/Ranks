@@ -143,6 +143,10 @@ icon instead, so it wants an 18-band ladder; one ships at
 | `Points.SecondsBetweenKills` | int | `0` | Streak window; `0` lets the round bound it |
 | `Points.KillstreakResetOnRoundEnd` | bool | `true` | Clear streaks at round end |
 | `Points.ShowPlayerNames` | bool | `false` | Name the other player in point messages |
+| `Points.KillStreaksEnabled` | bool | `true` | Award killstreak bonuses |
+| `Points.RoundEndSummary` | bool | `false` | Batch point messages into one round-end line |
+| `Points.ShowPointMessages` | bool | `true` | Server default for per-point chat messages |
+| `Points.ShowRankChangeMessages` | bool | `true` | Announce promotions and demotions |
 
 #### VIP and General
 
@@ -151,10 +155,6 @@ icon instead, so it wants an 18-band ladder; one ships at
 | `Vip.Multiplier` | double | `1.25` | Applied to every core award for flag holders |
 | `Vip.Flags` | array | `["@ranks/vip"]` | Flags that earn the multiplier |
 | `General.DetailedLogging` | bool | `false` | Narrate expected flow; warnings and errors always print |
-| `General.KillStreaksEnabled` | bool | `true` | Award killstreak bonuses |
-| `General.RoundEndSummary` | bool | `false` | Batch point messages into one round-end line |
-| `General.ShowPointMessages` | bool | `true` | Server default for per-point chat messages |
-| `General.ShowRankChangeMessages` | bool | `true` | Announce promotions and demotions |
 
 ### `points.jsonc`
 

@@ -37,7 +37,7 @@ internal sealed class PlayerRecord
 
     public DateTime LastSeen { get; set; }
 
-    /// <summary>Per-player override of <c>General.ShowPointMessages</c>, from <c>ranks_settings</c>.</summary>
+    /// <summary>Per-player override of <c>Points.ShowPointMessages</c>, from <c>ranks_settings</c>.</summary>
     public bool ShowPointMessages { get; set; } = true;
 
     /// <summary>Which ladder tier the player is in, 0-based.</summary>

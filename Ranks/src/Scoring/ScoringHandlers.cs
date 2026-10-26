@@ -416,7 +416,7 @@ internal sealed class ScoringHandlers
     {
         var config = _config.Current;
 
-        if (!config.General.KillStreaksEnabled) return;
+        if (!config.Points.KillStreaksEnabled) return;
 
         var now = DateTime.UtcNow;
         var window = config.Points.SecondsBetweenKills;
