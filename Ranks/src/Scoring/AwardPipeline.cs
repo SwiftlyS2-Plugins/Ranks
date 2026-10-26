@@ -62,6 +62,30 @@ internal sealed class AwardPipeline
         }
     }
 
+    /// <summary>Whether a death is a fact about play at all (FR-PTS-03).</summary>
+    /// <remarks>
+    /// Warmup and bot involvement drop the event outright rather than only its award, so no counter,
+    /// killstreak or arbiter claim derives from it. Suppressing only the award left killstreak tiers
+    /// payable against bots: <c>AwardKillstreak</c> has no counterparty, so the bot gate never saw one.
+    /// </remarks>
+    public bool ShouldRecordDeath(bool victimIsBot, bool attackerIsBot)
+    {
+        var config = _config.Current;
+
+        return ShouldRecordDeath(
+            config.Rank.WarmupPoints, IsWarmup(), config.Rank.PointsForBots, victimIsBot, attackerIsBot);
+    }
+
+    /// <remarks>Split from the live state so <c>ScoringSelfCheck</c> can assert the truth table.</remarks>
+    internal static bool ShouldRecordDeath(
+        bool warmupPoints, bool isWarmup, bool pointsForBots, bool victimIsBot, bool attackerIsBot)
+    {
+        if (!warmupPoints && isWarmup) return false;
+        if (!pointsForBots && (victimIsBot || attackerIsBot)) return false;
+
+        return true;
+    }
+
     /// <summary>Awards a configured event to a player, applying gates and multipliers.</summary>
     /// <remarks>
     /// Returns silently when core's scoring is off: with core not awarding, its gates and
@@ -80,8 +104,9 @@ internal sealed class AwardPipeline
 
         if (!config.Rank.UseCoreRankingLogic) return;
 
-        // 1. Gates. Context gates suppress only the award; the caller has already counted the
-        //    fact. PointsForBots is the exception and suppresses both, caller-side (FR-PTS-03).
+        // 1. Gates. MinPlayers suppresses only the award; the caller has already counted the fact.
+        //    Warmup and bot involvement are enforced earlier, by ShouldRecordDeath (FR-PTS-03) — the
+        //    checks below remain as the guard for any caller that is not the death handler.
         if (!PassesGates(config, counterpartyIsBot)) return;
 
         // 2. Base value.

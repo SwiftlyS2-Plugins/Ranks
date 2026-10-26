@@ -62,11 +62,11 @@ leaderboard farmable.
 > `false`. It warns rather than auto-corrects: an operator may legitimately run
 > FFA and still not want friendly fire counted.
 
-**Counters are raw event counts, and the only scoring gate that reaches them is
-the bot one.** That is core's rule, not this module inventing a policy: per
-FR-PTS-03 a *context* gate (MinPlayers, warmup, FFA) suppresses the award and
-never the stat, while `PointsForBots` suppresses both — a bot is not a player,
-so a kill on one is not a fact about play.
+**Counters are raw event counts, and the scoring gates that reach them are the bot
+and warmup ones.** That is core's rule, not this module inventing a policy: per
+FR-PTS-03 `MinPlayers` and FFA suppress the award and never the stat, while
+`PointsForBots` and `WarmupPoints` discard the death event outright — a bot is not a
+player and a warmup round is not the match, so neither is a fact about play.
 
 The payoff is a **reconciliation invariant** worth testing against:
 
@@ -75,13 +75,20 @@ SUM(ranks_weapon_stats.kills)  WHERE steam_id = X  ==  ranks_players.kills  for 
 SUM(ranks_weapon_stats.deaths) WHERE steam_id = X  ==  ranks_players.deaths for X
 ```
 
-**It holds at the shipped defaults**, because both sides then count the same
-events under the same rules — team kills excluded on both (§1.1), bot
-interactions excluded on both (`CountAgainstBots` / `CountFromBots` default
+**It holds at the shipped defaults on a server without warmup**, because both sides
+then count the same events under the same rules — team kills excluded on both (§1.1),
+bot interactions excluded on both (`CountAgainstBots` / `CountFromBots` default
 `false` to match core's `PointsForBots`), every non-bot death counted on both,
 and bots given rows on neither (FR-DB-07).
 
-Three things break it, all of them deliberate operator choices:
+**Warmup breaks it, and no setting here reconciles it.** Core discards warmup deaths
+when `Rank.WarmupPoints` is off; this module has no warmup gate and records them, so
+its totals run **high** by exactly the warmup kills. Closing that would mean either a
+`Tracking.CountDuringWarmup` switch plus a live warmup signal on the core API
+(`GetPointSettings` carries the *setting*, not the current phase), or accepting the
+divergence. It is accepted for now.
+
+Three settings also break it, all of them deliberate operator choices:
 
 | Setting | Effect on the invariant |
 |---|---|

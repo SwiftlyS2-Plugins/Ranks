@@ -568,29 +568,41 @@ A configured value of `0` disables the event, including its chat line, but
 | Bot victim/actor | `Rank.PointsForBots` | `false` |
 | FFA mode (suppresses team-damage penalties) | `Rank.FfaMode` | `false` |
 
-**A context gate suppresses the award, never the stat increment. The bot gate
-suppresses both.**
+**`MinPlayers` and `FfaMode` suppress the award, never the stat increment.
+`WarmupPoints` and `PointsForBots` discard the death event outright.**
 
-`MinPlayers`, `WarmupPoints` and `FfaMode` are judgements about when play is
-worth paying for — the kills still happened, between real players, so warmup
-kills still count and a kill below `MinPlayers` still counts. That is the same
-separation FR-PTS-02 states for a configured value of `0` and FR-PTS-00 for
-`UseCoreRankingLogic = false`: points are a judgement, counters are facts.
+`MinPlayers` and `FfaMode` are judgements about when play is worth paying for —
+the kills still happened, between real players, so a kill below `MinPlayers`
+still counts. That is the same separation FR-PTS-02 states for a configured value
+of `0` and FR-PTS-00 for `UseCoreRankingLogic = false`: points are a judgement,
+counters are facts.
 
-`PointsForBots` is different in kind. It does not ask whether play was worth
-paying for, it asks whether the counterparty was a player at all. With it
-`false`, a kill on a bot, a death to a bot and an assist on a bot are **not
-recorded** — they are not facts about play, and counting them makes `!top kills`
-farmable against AI on any server that leaves bots in.
+`WarmupPoints` and `PointsForBots` are different in kind. They do not ask whether
+play was worth paying for, they ask whether this was play at all — a warmup round
+is not the match, and a bot is not a player. With either `false`, the matching
+`player_death` is dropped before anything derives from it: no `kills`, `deaths` or
+`assists`, no killstreak, and no `IRanksKillArbiter` claim (FR-API-11).
 
-It gates only the three counterparty counters. `round_wins`, `round_losses`,
-`match_wins`, `match_losses`, `bombs_planted` and `bombs_defused` have no
-counterparty and are unaffected.
+> [!NOTE]
+> This reverses the earlier rule, under which both suppressed only the award. That
+> version was unsound: `AwardKillstreak` has no counterparty to pass, so the bot gate
+> in `PassesGates` never saw one and **killstreak tiers paid out against bots** on any
+> server that left them in — `core.streak_godlike` is 15 points, farmable against AI.
+> Gating each award site individually cannot fix that, because a streak is a property
+> of the round rather than of one kill; only dropping the event can.
+
+Both gate the three counterparty counters and everything downstream of the death.
+`round_wins`, `round_losses`, `match_wins`, `match_losses`, `bombs_planted` and
+`bombs_defused` come from other events and are unaffected — warmup rounds that end
+still move the round counters.
 
 > **Consequence for `SUM(WeaponStats.kills)`.** The reconciliation against
-> `ranks_players.kills` now requires `Ranks_WeaponStats`'s `CountAgainstBots` /
-> `CountFromBots` to agree with this gate. Both ship `false` to match
-> `PointsForBots`'s own default, so the shipped defaults still reconcile.
+> `ranks_players.kills` requires `Ranks_WeaponStats`'s `CountAgainstBots` /
+> `CountFromBots` to agree with `PointsForBots`. Both ship `false` to match its
+> default, so the bot half reconciles. **The warmup half does not**:
+> `Ranks_WeaponStats` has no warmup gate, so with `WarmupPoints` off it records
+> warmup kills that core now discards, and its total runs ahead on any server with
+> warmup enabled.
 
 Gate state must be readable from the API (FR-API-05) so a module can skip
 expensive work it knows will be discarded.

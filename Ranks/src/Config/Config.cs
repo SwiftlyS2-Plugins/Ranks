@@ -58,12 +58,15 @@ public sealed class RankOptions
 
     public int StartPoints { get; set; } = 0;
 
-    /// <remarks><c>false</c> awards no points during warmup.</remarks>
+    /// <remarks>
+    /// <c>false</c> discards warmup deaths outright — no award, and no counters, killstreak or
+    /// arbiter claim derived from them. A warmup round is not the match (FR-PTS-03).
+    /// </remarks>
     public bool WarmupPoints { get; set; } = false;
 
     /// <remarks>
-    /// Unlike the context gates, this suppresses the <em>stat counters</em> as well as the
-    /// award: a bot is not a player, so a kill on one is not a fact about play (FR-PTS-03).
+    /// <c>false</c> discards any death involving a bot, on the same terms as warmup: a bot is not
+    /// a player, so a kill on one is not a fact about play (FR-PTS-03).
     /// </remarks>
     public bool PointsForBots { get; set; } = false;
 

@@ -18,6 +18,7 @@ internal static class ScoringSelfCheck
         DifferenceIsBoundedAndSymmetric();
         AnchorTableHolds();
         LadderPicksTheHighestThresholdMet();
+        DeathGateDropsWarmupAndBots();
     }
 
     /// <remarks>The anchor the config documents — any replacement formula must preserve it.</remarks>
@@ -89,6 +90,35 @@ internal static class ScoringSelfCheck
         Require(ladder.IndexFor(int.MaxValue) == tiers.Count - 1, "a huge total did not resolve to the top tier");
         Require(ladder.PointsToNext(tiers[^1].Points) is null, "the top tier reported a next tier");
         Require(ladder.ProgressInBand(tiers[^1].Points) == 1.0, "the top tier did not report full progress");
+    }
+
+    /// <remarks>
+    /// The regression this exists for is the bot row below: while these gates only suppressed the
+    /// award, <c>AwardKillstreak</c> passed no counterparty, so streak tiers paid out against bots
+    /// on every server that left them in. Nothing in game reports either failure direction.
+    /// </remarks>
+    private static void DeathGateDropsWarmupAndBots()
+    {
+        // warmupPoints, isWarmup, pointsForBots, victimIsBot, attackerIsBot, expected
+        (bool W, bool InWarmup, bool Bots, bool VBot, bool ABot, bool Expected)[] cases =
+        [
+            (false, true,  true,  false, false, false),   // warmup drops it even when bots are paid
+            (false, true,  false, false, false, false),
+            (true,  true,  true,  false, false, true),    // warmup explicitly enabled
+            (false, false, false, true,  false, false),   // killed a bot
+            (false, false, false, false, true,  false),   // killed by a bot
+            (false, false, false, false, false, true),    // two humans, live round
+            (false, false, true,  true,  true,  true),    // bots explicitly paid
+        ];
+
+        foreach (var c in cases)
+        {
+            var actual = AwardPipeline.ShouldRecordDeath(c.W, c.InWarmup, c.Bots, c.VBot, c.ABot);
+
+            Require(actual == c.Expected,
+                $"death gate: warmupPoints={c.W} isWarmup={c.InWarmup} pointsForBots={c.Bots} " +
+                $"victimIsBot={c.VBot} attackerIsBot={c.ABot} gave {actual}, expected {c.Expected}");
+        }
     }
 
     private static void Require(bool condition, string failure)

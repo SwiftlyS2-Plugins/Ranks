@@ -197,8 +197,9 @@ Suppression is scoped deliberately:
 | Killstreak | **no** — a streak is a property of the round, not of this kill |
 | `kills` / `deaths` / `assists` counters | **never** |
 
-That last row is FR-PTS-03: points are a judgement, counters are facts. Only
-`PointsForBots` suppresses a counter, and it does so for everyone.
+That last row is FR-PTS-03: points are a judgement, counters are facts. The gates that
+do reach a counter are `WarmupPoints` and `PointsForBots`, and they do so by dropping
+the death before this module is consulted at all — for everyone.
 
 ---
 
@@ -304,8 +305,8 @@ these counts are keyed by SteamID in a plain map and simply wait for the next ti
 timer.
 
 **A combo counts whenever it matches, including when a gate refused the points** — FR-PTS-03
-again. The one exception is a bot victim with `PointsForBots` off, which suppresses the
-counter too, exactly as core now does for kills.
+again. The exceptions are `PointsForBots` and `WarmupPoints`: with either off, core discards the
+matching death and never consults the arbiter, so there is nothing to count.
 
 `!combos`, alias `!mycombos`, name and permission configurable in `commands.jsonc` like
 core's. Lists the caller's combos and counts, ordered by count.

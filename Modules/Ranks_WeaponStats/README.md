@@ -108,7 +108,8 @@ Independent on purpose — set either, both or neither. The usual reason to spli
 is a practice server where bot kills are padding but deaths to bots still matter.
 
 **Both default to `false`, matching core's `Rank.PointsForBots`.** At the shipped
-defaults this module's totals reconcile with core's:
+defaults this module's bot handling matches core's, so on a server without warmup the
+totals reconcile:
 
 ```
 SUM(ranks_weapon_stats.kills) per player  ==  ranks_players.kills
@@ -117,6 +118,12 @@ SUM(ranks_weapon_stats.kills) per player  ==  ranks_players.kills
 Setting either switch independently of core's breaks that, and `!weaponstats` will
 disagree with `!stats`. That is an operator choice rather than a bug — but worth
 knowing before the first player reports it.
+
+> [!NOTE]
+> **Warmup is a second, unavoidable source of divergence.** Core drops warmup deaths
+> entirely when its `Rank.WarmupPoints` is off; this module has no warmup switch and
+> records them, so its totals run ahead on any server with warmup enabled. There is no
+> setting that reconciles the two today.
 
 > [!WARNING]
 > **`CountAgainstBots = false` makes accuracy read low.** Shots come from

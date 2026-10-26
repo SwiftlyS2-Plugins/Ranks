@@ -50,6 +50,14 @@ internal sealed class ScoringHandlers
     [GameEventHandler(HookMode.Post)]
     public HookResult OnPlayerDeath(EventPlayerDeath e)
     {
+        var victimIsBot = IsBot(e.UserIdPlayer);
+        var attackerIsBot = IsBot(e.AttackerPlayer);
+
+        // Warmup and bot involvement disregard the event entirely — no counters, no killstreak, no
+        // arbiter claim. Returning here rather than per-award is what keeps a streak from being
+        // built on bots, which AwardKillstreak cannot gate on because it has no counterparty.
+        if (!_awards.ShouldRecordDeath(victimIsBot, attackerIsBot)) return HookResult.Continue;
+
         var victim = Record(e.UserIdPlayer);
         var attacker = Record(e.AttackerPlayer);
         var assister = Record(e.AssisterPlayer);
@@ -57,34 +65,22 @@ internal sealed class ScoringHandlers
         var selfInflicted = attacker is null || attacker.SteamId == victim?.SteamId;
         var friendlyFire = !selfInflicted && IsSameTeam(e.UserIdPlayer, e.AttackerPlayer);
 
-        // PointsForBots gates the counters as well as the awards: a bot is not a player, so a kill
-        // on one is not a fact worth recording. The context gates (MinPlayers, Warmup, FfaMode)
-        // still only suppress the award — those kills happened between real players.
-        var countBots = _config.Current.Rank.PointsForBots;
-        var victimIsBot = IsBot(e.UserIdPlayer);
-        var attackerIsBot = IsBot(e.AttackerPlayer);
-
         if (victim is not null)
         {
-            if (countBots || !attackerIsBot)
-            {
-                victim.Deaths++;
-                victim.Dirty = true;
-            }
-
-            // Reset regardless of the gate: the streak is in-memory, and the player did die.
+            victim.Deaths++;
+            victim.Dirty = true;
             victim.Killstreak = 0;
         }
 
         // Enemy kills only. A team kill is its own event, and counting it here would make
         // !top kills farmable by killing teammates.
-        if (attacker is not null && !selfInflicted && !friendlyFire && (countBots || !victimIsBot))
+        if (attacker is not null && !selfInflicted && !friendlyFire)
         {
             attacker.Kills++;
             attacker.Dirty = true;
         }
 
-        if (assister is not null && assister.SteamId != attacker?.SteamId && (countBots || !victimIsBot))
+        if (assister is not null && assister.SteamId != attacker?.SteamId)
         {
             assister.Assists++;
             assister.Dirty = true;

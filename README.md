@@ -83,7 +83,7 @@ Four files, all created on first load, all reloaded on save.
 |------|-------|
 | `config.jsonc` | Database, gates, scoreboard, multipliers, general behaviour |
 | `points.jsonc` | What each event is worth |
-| `ladder.jsonc` | The rank tiers |
+| `ranks.jsonc` | The rank tiers |
 | `commands.jsonc` | Command names, aliases and permissions |
 
 ### `config.jsonc`
@@ -109,15 +109,16 @@ Prefix and suffix are normalised to one underscore, so `awp`, `awp_` and `_awp` 
 | `Rank.MinPlayers` | int | `4` | Minimum players before points are awarded |
 | `Rank.MinPoints` | int | `0` | Floor a player cannot fall below |
 | `Rank.StartPoints` | int | `0` | Points a new player begins with |
-| `Rank.WarmupPoints` | bool | `false` | Award points during warmup |
+| `Rank.WarmupPoints` | bool | `false` | Count warmup at all — `false` discards warmup deaths entirely |
 | `Rank.PointsForBots` | bool | `false` | Count kills, deaths and assists involving bots |
 | `Rank.FfaMode` | bool | `false` | Suppress team-damage penalties on free-for-all servers |
 
 > [!NOTE]
-> **`PointsForBots` is not like the other gates.** `MinPlayers`, `WarmupPoints` and `FfaMode`
-> suppress the *award* and still record the kill — those happened between real players. With
-> `PointsForBots` off, bot kills, deaths and assists are **not recorded at all**, because a bot is
-> not a player and counting it makes `!top kills` farmable against AI.
+> **`WarmupPoints` and `PointsForBots` discard the death, not just the points.** `MinPlayers` and
+> `FfaMode` suppress the *award* and still record the kill — that happened between real players.
+> With `WarmupPoints` or `PointsForBots` off, the matching deaths are dropped outright: no kills,
+> deaths or assists, and no killstreak. A warmup round is not the match, and a bot is not a player
+> — counting either made `!top kills` and the streak tiers farmable against AI.
 
 #### Scoreboard
 
@@ -181,9 +182,9 @@ a single rounding at the end, then the write and the chat line.
 **Rounding happens once, away from zero.** Rounding per stage lets a small award decay to nothing
 through the multipliers, and a death penalty that rounds to `0` is a free death.
 
-**Points are a judgement, counters are facts.** A disabled event, a context gate, or
-`UseCoreRankingLogic = false` all stop the *award* while the stat counters keep running. The one
-exception is `PointsForBots`, which stops both — see above.
+**Points are a judgement, counters are facts.** A disabled event, `MinPlayers`, `FfaMode`, or
+`UseCoreRankingLogic = false` all stop the *award* while the stat counters keep running. The two
+exceptions are `WarmupPoints` and `PointsForBots`, which discard the death entirely — see above.
 
 **Persistence**
 
@@ -270,8 +271,8 @@ Core raises every API event on the game thread, so handlers must not block.
 |---------|----------------|----------|
 | Plugin refuses to start | `Database.Connection` names no entry | Fix the name, or add the entry to `configs/database.jsonc` |
 | No points awarded | Fewer than `Rank.MinPlayers` on the server | Lower it, or wait for more players |
-| No points during warmup | `Rank.WarmupPoints` is `false` | Set it to `true` |
-| Bot kills not counted | `Rank.PointsForBots` is `false` | Set it to `true` — it gates the counters, not just the award |
-| Everyone sits in the bottom tier | Ladder thresholds do not match the scoring pace | Re-tune `ladder.jsonc`, or use an example ladder |
+| No points during warmup | `Rank.WarmupPoints` is `false` | Set it to `true` — it discards the whole death, not just the points |
+| Bot kills not counted | `Rank.PointsForBots` is `false` | Set it to `true` — it discards the whole death, not just the points |
+| Everyone sits in the bottom tier | Ladder thresholds do not match the scoring pace | Re-tune `ranks.jsonc`, or use an example ladder |
 | Scoreboard shows no rank | `Scoreboard.RankMode` is `Off` | Pick a mode; `Competitive` also needs an 18-band ladder |
 | A module's tables are missing | The module loaded before core was ready | Check the console for its migration line at startup |

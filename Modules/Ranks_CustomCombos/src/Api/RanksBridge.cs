@@ -241,8 +241,9 @@ internal sealed class ComboArbiter : IRanksKillArbiter
             if (rule is null) return null;
 
             // Counted here rather than after the award: a context gate refusing the points does not
-            // unmake the combo, and counters are facts (FR-PTS-03). A bot victim with core's
-            // PointsForBots off is the one case that suppresses the counter too, matching core.
+            // unmake the combo, and counters are facts (FR-PTS-03). Core now drops bot and warmup
+            // deaths before the arbiter is reached, so this guard is only load-bearing against an
+            // older core that still called it for bot kills.
             if (_countBots || !context.VictimIsBot)
                 _counters.Record(context.AttackerSteamId, rule.Key);
 
