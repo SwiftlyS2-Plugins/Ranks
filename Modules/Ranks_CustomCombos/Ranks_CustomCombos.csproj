@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Ranks_CustomCombos</AssemblyName>
+    <RootNamespace>Ranks.CustomCombos</RootNamespace>
+    <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
+    <PublishDir>$(OutputPath)publish/Ranks_CustomCombos</PublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="SwiftlyS2.CS2" Version="*-*" ExcludeAssets="runtime" PrivateAssets="all" />
+
+    <!-- FluentMigrator is compile-only here: core owns the runner, this module only declares the
+         Migration classes it hands over. Shipping the runtime assets would put a second copy
+         beside core's. -->
+    <PackageReference Include="FluentMigrator" Version="8.*" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=false is load-bearing, not tidiness: copying Ranks.Contract.dll next to this
+         plugin makes the host load a SECOND one, giving IRanksApi two Type identities, and
+         TryGetSharedInterface silently stops matching on a server where Ranks is plainly running
+         (FR-API-00). -->
+    <ProjectReference Include="../../Ranks.Contract/Ranks.Contract.csproj" Private="false" />
+
+    <!-- Same single-copy rule, but this module ships the copy itself (CopyContract below): it owns
+         this contract, so no other component is guaranteed to be installed to ship it. -->
+    <ProjectReference Include="Ranks_CustomCombos.Contract/Ranks_CustomCombos.Contract.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The contract lives inside this project's directory, so the default glob would compile its
+         sources into the plugin on top of referencing the assembly. -->
+    <Compile Remove="Ranks_CustomCombos.Contract/**/*.cs" />
+    <!-- The self-check harness is a throwaway console app that links this module's source files;
+         compiling its Program.cs into the plugin would be an error waiting on a glob change. -->
+    <Compile Remove=".selfcheck/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="resources/translations/**/*;resources/examples/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Resolved inside a target rather than an item glob: the contract DLL does not exist during
+       project evaluation, so a glob ships nothing from a clean checkout and fails only at runtime
+       with a ReflectionTypeLoadException. -->
+  <Target Name="CopyContract" AfterTargets="Build">
+    <PropertyGroup>
+      <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_CustomCombos.Contract/build/$(TargetFramework)/Ranks_CustomCombos.Contract.dll</_ApiContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ApiContractDll)')"
+           Text="CopyContract: $(_ApiContractDll) is missing. Build Ranks_CustomCombos.Contract first." />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyContractToPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_CustomCombos.Contract/build/$(TargetFramework)/Ranks_CustomCombos.Contract.dll</_ApiContractDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_ApiContractDll)')"
+           Text="CopyContractToPublish: $(_ApiContractDll) is missing. Build Ranks_CustomCombos.Contract first." />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

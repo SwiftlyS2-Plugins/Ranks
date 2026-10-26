@@ -27,6 +27,7 @@ internal sealed class AwardPipeline
     private readonly RanksEventHub _events;
     private readonly DetailLog _detail;
     private readonly ILogger _logger;
+    private IRanksKillArbiter? _killArbiter;
 
     public AwardPipeline(
         ISwiftlyCore core,
@@ -87,8 +88,60 @@ internal sealed class AwardPipeline
         var configured = _points.Current.Value(eventKey);
         if (configured == 0) return;
 
-        var baseAmount = configured * count;
+        AwardResolved(config, record, eventKey, configured * count, displayText: null, counterparty, scaling);
+    }
 
+    /// <summary>Registers the kill arbiter, or clears it (FR-API-11).</summary>
+    public void SetKillArbiter(IRanksKillArbiter? arbiter) => _killArbiter = arbiter;
+
+    /// <summary>Asks the arbiter what it wants done with a kill. Null when none is registered.</summary>
+    /// <remarks>
+    /// Called unconditionally, including when a gate will refuse the points: an arbiter keeps its
+    /// own counters, and those are facts rather than judgements (FR-PTS-03).
+    /// </remarks>
+    public RanksKillClaim? ClaimKill(RanksKillContext context)
+    {
+        if (_killArbiter is null) return null;
+
+        try
+        {
+            return _killArbiter.ClaimKill(context);
+        }
+        catch (Exception ex)
+        {
+            // A throwing arbiter must not cost the player the kill core was about to award.
+            _logger.LogError(ex, "Ranks: the kill arbiter threw; core is awarding the kill itself.");
+            return null;
+        }
+    }
+
+    /// <summary>Awards an arbiter's claim through core's own gates, multipliers and messaging.</summary>
+    /// <remarks>
+    /// Deliberately not <see cref="AddPoints"/>: routing it here is what stops every arbiter
+    /// reimplementing the gates, the VIP multiplier, the single rounding, the per-player
+    /// <c>!togglepointmsg</c> preference and round-end batching (FR-API-11). Dynamic kill scaling
+    /// is left off — it prices a kill by rank gap, and a claim is already a considered number.
+    /// </remarks>
+    public void AwardClaim(PlayerRecord record, RanksKillClaim claim, ulong? counterparty, bool counterpartyIsBot)
+    {
+        var config = _config.Current;
+
+        if (!config.Rank.UseCoreRankingLogic) return;
+        if (!PassesGates(config, counterpartyIsBot)) return;
+        if (claim.Points == 0) return;
+
+        AwardResolved(config, record, claim.Reason, claim.Points, claim.DisplayText, counterparty, ScalingKind.None);
+    }
+
+    private void AwardResolved(
+        RanksConfig config,
+        PlayerRecord record,
+        string eventKey,
+        int baseAmount,
+        string? displayText,
+        ulong? counterparty,
+        ScalingKind scaling)
+    {
         // 3. Subscribers may rescale or cancel.
         var changing = _events.RaisePointsChanging(new RanksPointsChangingArgs
         {
@@ -109,7 +162,7 @@ internal sealed class AwardPipeline
         var delta = (int)Math.Round(changing.Amount * multiplier, MidpointRounding.AwayFromZero);
         if (delta == 0) return;
 
-        Apply(record, delta, eventKey, showMessage: true, counterparty);
+        Apply(record, delta, eventKey, showMessage: true, counterparty, displayText);
     }
 
     /// <summary>Adds an already-computed amount. Never gated, multiplied or scaled.</summary>
@@ -141,7 +194,7 @@ internal sealed class AwardPipeline
         Apply(record, target - record.Points, reason, showMessage: false);
     }
 
-    private void Apply(PlayerRecord record, int delta, string reason, bool showMessage, ulong? counterparty = null)
+    private void Apply(PlayerRecord record, int delta, string reason, bool showMessage, ulong? counterparty = null, string? displayText = null)
     {
         var config = _config.Current;
         var oldPoints = record.Points;
@@ -161,7 +214,7 @@ internal sealed class AwardPipeline
 
         _events.RaisePointsChanged(new RanksPointsChangedArgs(record.SteamId, oldPoints, record.Points, applied, reason));
 
-        if (showMessage) ReportPoints(config, record, applied, reason, counterparty);
+        if (showMessage) ReportPoints(config, record, applied, reason, counterparty, displayText);
 
         if (record.RankIndex != oldIndex) ReportRankChange(config, record, oldIndex);
     }
@@ -213,7 +266,7 @@ internal sealed class AwardPipeline
         return DynamicScaling.Multiplier(DynamicScaling.Difference(victim, attacker), min, max);
     }
 
-    private void ReportPoints(RanksConfig config, PlayerRecord record, int delta, string reason, ulong? counterparty)
+    private void ReportPoints(RanksConfig config, PlayerRecord record, int delta, string reason, ulong? counterparty, string? displayText = null)
     {
         if (!config.General.ShowPointMessages || !record.ShowPointMessages) return;
 
@@ -231,8 +284,8 @@ internal sealed class AwardPipeline
         var opponent = CounterpartyName(config, counterparty);
 
         player.SendChat(opponent is null
-            ? _core.Localizer[gained ? "points.gained" : "points.lost", Math.Abs(delta), DescribeReason(reason), record.Points]
-            : _core.Localizer[gained ? "points.gained_vs" : "points.lost_vs", Math.Abs(delta), DescribeReason(reason), opponent, record.Points]);
+            ? _core.Localizer[gained ? "points.gained" : "points.lost", Math.Abs(delta), DescribeReason(reason, displayText), record.Points]
+            : _core.Localizer[gained ? "points.gained_vs" : "points.lost_vs", Math.Abs(delta), DescribeReason(reason, displayText), opponent, record.Points]);
     }
 
     /// <remarks>
@@ -252,10 +305,12 @@ internal sealed class AwardPipeline
     /// <remarks>
     /// Only core's own keys are translated. A module calling AddPoints with its own reason gets
     /// that string shown verbatim — core cannot ship a translation key for a reason it has never
-    /// heard of, and a missing key renders the literal {lang}.{key} marker to the player.
+    /// heard of, and a missing key renders the literal {lang}.{key} marker to the player. An
+    /// arbiter avoids that by resolving its own text and passing it as <c>DisplayText</c>.
     /// </remarks>
-    private string DescribeReason(string reason) =>
-        reason.StartsWith("core.", StringComparison.Ordinal) ? _core.Localizer[$"event.{reason}"] : reason;
+    private string DescribeReason(string reason, string? displayText = null) =>
+        displayText
+        ?? (reason.StartsWith("core.", StringComparison.Ordinal) ? _core.Localizer[$"event.{reason}"] : reason);
 
     private void ReportRankChange(RanksConfig config, PlayerRecord record, int oldIndex)
     {

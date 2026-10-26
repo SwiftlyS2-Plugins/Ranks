@@ -75,6 +75,16 @@ public interface IRanksApi
     /// <summary>Core's quiet window, raised after core's own maintenance completes (FR-DB-09).</summary>
     event Action MaintenanceDue;
 
+    // ---- FR-API-11 kill arbitration ------------------------------------------
+
+    /// <summary>Registers the arbiter core consults before awarding a kill, or null to clear it.</summary>
+    /// <remarks>
+    /// At most one is active: a second registration replaces the first, the same single-authority
+    /// constraint as absolute scoring (FR-PTS-00). Core does not police the operator pairing it
+    /// with a rating module.
+    /// </remarks>
+    void SetKillArbiter(IRanksKillArbiter? arbiter);
+
     // ---- FR-API-05 gates and settings ----------------------------------------
 
     bool ArePointsEnabled { get; }

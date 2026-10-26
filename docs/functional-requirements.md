@@ -500,7 +500,10 @@ registry of who is scoring and deliberately does not acquire one.
 >
 > `AddPoints` is relative and cannot lose anyone's work in either order, so
 > additive modules — `Ranks_CustomCombos` (FR-MOD-06) is the reference case —
-> coexist freely with whichever authority is active, and with each other.
+> coexist freely with whichever authority is active, and with each other. That
+> holds for `Ranks_CustomCombos` in its default mode; with `SuppressCoreAwards`
+> on it is deciding the award rather than adding to one, and stops being safe to
+> pair with an absolute authority.
 >
 > This is the rule that tells a module author which kind they are building.
 
@@ -830,9 +833,12 @@ reset on death and, optionally, on round end
 
 Streaks are the one count-based case core keeps, because a streak is a property
 of the player's round rather than of any single kill and needs no attribute
-vocabulary to express. A streak **restricted** to a weapon or a placement is a
-combo and belongs to `Ranks_CustomCombos` (FR-MOD-06, `Count: N` plus attribute
-requirements) — not a second killstreak system inside core.
+vocabulary to express. Core's streaks are weapon-agnostic, and
+`Ranks_CustomCombos`'s `Count` is same-tick only (FR-MOD-06) — so a streak
+**restricted** to a weapon or a placement, spread over a round, is deliberately
+supported by neither. Adding it means either an attribute vocabulary inside core
+or a timed window back in the module; both were rejected, and a second killstreak
+system inside core is not the answer.
 
 ### FR-PTS-08 — Point feedback
 
@@ -851,8 +857,8 @@ is a value for the **combination** — "a knife headshot is worth a 50-point
 bonus", or "a triple kill with a grenade".
 
 **Core does not gain that vocabulary.** It ships the flat catalogue and nothing
-else. Combination scoring is `Ranks_CustomCombos` (FR-MOD-06), an additive
-module that observes kills itself and calls `AddPoints` for the bonus.
+else. Combination scoring is `Ranks_CustomCombos` (FR-MOD-06), which core consults
+per kill through FR-API-11 and whose claim core awards through its own pipeline.
 
 The split is deliberate rather than a scoping convenience:
 
@@ -1263,33 +1269,45 @@ Awards bonus points for **combinations** of kill attributes that core's flat
 catalogue cannot price (FR-PTS-09) — "a knife headshot is worth 50", "a triple
 kill with one grenade is worth 100".
 
-**It is an additive module** (FR-PTS-00). Core scoring stays on, the module
-never calls `SetPoints`, and it therefore composes with whichever absolute
-authority is active: a server can run core scoring + combos, or
-`Ranks_EloPoints` + combos, with no configuration shared between them and no
-ordering dependency. It is the reference case for the additive kind.
+**It is additive by default** (FR-PTS-00). Core scoring stays on, the module never
+calls `SetPoints`, and it composes with whichever absolute authority is active: a
+server can run core scoring + combos, or `Ranks_EloPoints` + combos, with no
+configuration shared between them.
 
-Every kill produces an **attribute set**. The sources below are verified against
-`EventPlayerDeath`; attributes marked *derived* are not event fields and the
-module computes them:
+**With `SuppressCoreAwards` enabled it stops being purely additive**, and that is a
+real trade rather than a setting: core must consult the module before awarding a
+kill (FR-API-11), so the module gains an ordering dependency on core that the
+default mode does not have. An operator running it this way alongside an absolute
+rating module has two authorities deciding one number, which nothing detects.
+
+Every kill produces an **attribute set**. Raw attributes are named for the
+`player_death` field they read, so an operator can check a name against an event
+dump rather than against this table; attributes marked *derived* have no field and
+the module computes them:
 
 | Attribute | Source |
 |---|---|
 | `headshot` | `Headshot` (bool) |
 | `noscope` | `NoScope` (bool) |
-| `through_smoke` | `ThruSmoke` (bool) |
-| `attacker_blind` | `AttackerBlind` (bool) |
-| `attacker_airborne` | `AttackerInAir` (bool) |
-| `wallbang` | `Penetrated > 0` — the field is a **count** (`short`), not a flag |
-| `long_distance` | `Distance` (float) past the module's `LongDistanceUnits` (default `2000`, matching core's `Points.LongDistanceUnits`) |
-| `revenge` | `Revenge` (short) |
-| `domination` | `Dominated` (short) |
+| `thrusmoke` | `ThruSmoke` (bool) |
+| `attackerblind` | `AttackerBlind` (bool) |
+| `attackerinair` | `AttackerInAir` (bool) |
+| `assistedflash` | `AssistedFlash` (bool) |
+| `penetrated` | `Penetrated > 0` — the field is a **count** (`short`), not a flag |
+| `revenge` | `Revenge > 0` (short) |
+| `dominated` | `Dominated > 0` (short) |
 | `hitgroup:<group>` | `ActualHitGroup` (`HitGroup_t`) |
 | `weapon:<classname>` | `Weapon` (string) |
+| `distance:<units>` | `Distance` (float) at or past `<units>` |
 | `weapon_class:<class>` | *derived* — mapped from `Weapon` to `knife` / `grenade` / `inferno` / `taser` / `pistol` / `smg` / `rifle` / `sniper` / `shotgun` / `heavy` |
 | `team_kill` | *derived* — attacker and victim on the same team |
 | `suicide` | *derived* — no attacker, or attacker is the victim |
 | `first_blood` | *derived* — the module tracks it per round |
+
+> `distance:<units>` is parameterised rather than a `long_distance` flag plus a
+> module-wide threshold: two combos wanting different distances is ordinary, and one
+> shared setting cannot express it. It also leaves the module with no distance
+> configuration of its own.
 
 > There is deliberately **no `victim_blind` or `crouched` attribute.**
 > `EventPlayerDeath` carries neither; both would require reading victim pawn
@@ -1303,8 +1321,7 @@ with a point value:
 RanksKillMatch {
     string[] RequiresAll;    // every attribute must be present
     string[] RequiresNone;   // none of these may be present
-    int      Count;          // 1 = a single kill; N = N matching kills
-    double   Within;         // seconds the Count must occur in; 0 = same tick
+    int      Count;          // 1 = a single kill; N = N matching kills on the same tick
 }
 ```
 
@@ -1314,37 +1331,50 @@ The three examples from the feature request:
 |---|---|
 | Grenade kill | `RequiresAll: ["weapon_class:grenade"]` |
 | Knife headshot | `RequiresAll: ["headshot", "weapon_class:knife"]` |
-| Triple kill with a grenade | `RequiresAll: ["weapon_class:grenade"], Count: 3, Within: 0` |
+| Triple kill with a grenade | `RequiresAll: ["weapon_class:grenade"], Count: 3` |
 
-**`Within` is load-bearing, not a convenience.** A grenade triple kill is one
-detonation killing three players on the same tick, whereas a killstreak is kills
-spread over time without dying. They are different mechanics, and core's
-killstreak window (FR-PTS-07) defaults to no time limit — so a `Count`-only
-match would award "triple grenade kill" for three grenade kills scattered across
-an entire round. `Within: 0` means same tick; `Within: 5` means within five
-seconds.
+**`Count` is same-tick only.** A grenade triple kill is one detonation killing three
+players on the same tick, which is a different mechanic from a killstreak — kills
+spread over time without dying. Streaks and timed multi-kills are core's
+(FR-PTS-07), and this module never competes with them: a combo wanting "three kills
+in five seconds" is a core streak. With same-tick as the only window, an earlier
+`Within` field had exactly one legal value and was dropped.
 
-> **There is no `Suppresses` field, and that is not an oversight.** An earlier
-> draft let a combo replace the component events it was built from. That is not
-> implementable for an additive module: by the time the module sees the kill,
-> core has already awarded `core.headshot` **with the VIP and dynamic-kill
-> multipliers applied** (FR-PTS-04, FR-PTS-05), so the module cannot compute an
-> exact offset to cancel it without re-deriving the multiplier stack core just
-> ran. Combos are therefore purely additive, and an operator prices a combo
-> knowing the components have already paid out.
+**Suppression.** A global `SuppressCoreAwards` switch makes a matched combo the
+whole award for that kill instead of a bonus on top; a kill matching no combo is
+unaffected, or an ordinary kill would pay nothing. It suppresses `core.kill`, the
+attribute awards and the weapon class — but never the killstreak, which belongs to
+the round rather than the kill, and **never the stat counters** (FR-PTS-03).
+
+> This reverses an earlier decision (Q10). That draft was rejected because "by the
+> time the module sees the kill, core has already awarded `core.headshot` with the
+> VIP and dynamic-kill multipliers applied (FR-PTS-04, FR-PTS-05), so the module
+> cannot compute an exact offset to cancel it." That reasoning holds only while the
+> module observes the kill *after* core. FR-API-11 inverts the order — core consults
+> the module before awarding — so nothing is retracted and no offset is computed.
+
+> **`Count > 1` cannot suppress.** Core consults the module per kill, so on a
+> three-kill combo the module cannot know during kills one and two that a third is
+> coming; it can only claim on the third, by which point core has paid for the first
+> two. Suppressing only the last would produce "two kills paid, one suppressed, plus
+> the combo". Configuring both is a load-time error.
 
 Other rules:
 
 - Matching is declarative rather than a predicate so a combo is expressible in
   config at all.
-- Validation runs at load with the offending entry named — an unknown attribute,
-  an attribute present in both `RequiresAll` and `RequiresNone`, or `Count > 1`
-  with no `Within`.
+- Several combos can match one kill; **only the most specific pays** — the one with
+  the most `RequiresAll` entries, ties resolved by config order. Paying every match
+  compounds escalating tiers into numbers nobody configured.
+- Validation runs at load with the offending entry named — an unknown or malformed
+  attribute, an attribute present in both `RequiresAll` and `RequiresNone`, or
+  `Count > 1` together with suppression.
 - The module ships **no combos by default**. The vocabulary exists so servers can
   build them; shipping opinionated combinations is a balance decision that
   belongs to the operator.
-- Per-combo hit counters are optional. If the module wants `!combostats`, it owns
-  that table itself via FR-API-06 like any other module (Q3a).
+- Per-combo hit counters are **required**, not optional — nothing else reads the
+  data otherwise. The module owns that table itself via FR-API-06 like any other
+  module (Q3a), and exposes it through `!combos` (alias `!mycombos`).
 
 **Calibration is the module's problem, not core's.** Seeding every new player at
 the same rating lets a newcomer outrank an established player after one good
@@ -1862,6 +1892,54 @@ registration on it.
 
 ---
 
+### FR-API-11 — Kill arbitration
+
+```csharp
+public sealed record RanksKillContext(
+    ulong AttackerSteamId, ulong? VictimSteamId, bool VictimIsBot,
+    string Weapon, IReadOnlySet<string> Attributes);
+
+public sealed record RanksKillClaim(
+    string Reason, int Points, string? DisplayText, bool SuppressCoreAwards);
+
+public interface IRanksKillArbiter { RanksKillClaim? ClaimKill(RanksKillContext context); }
+
+void SetKillArbiter(IRanksKillArbiter? arbiter);
+```
+
+Core consults the registered arbiter inside its kill award path, passing the
+attribute set it has already computed, and awards any returned claim **through its
+own pipeline**. Exists for `Ranks_CustomCombos` (FR-MOD-06); at most one arbiter is
+registered at a time, the same operator constraint as the absolute authority rule
+(FR-PTS-00).
+
+**Core asks before it awards, and that ordering is the whole point.** A module
+hooking `player_death` separately cannot stop core awarding, and plugin ordering is
+not guaranteed — so suppression is not expressible any other way. Inverting the
+order also retires the objection that killed the earlier design (Q10): nothing has
+to be retracted, so no module re-derives core's multiplier stack to cancel it.
+
+Routing the claim through core's pipeline rather than `AddPoints` is what keeps a
+module from reimplementing core:
+
+| Comes from core | Otherwise reimplemented in every module |
+|---|---|
+| `MinPlayers`, `WarmupPoints`, `PointsForBots`, `FfaMode` | all four, from `GetPointSettings` |
+| VIP multiplier and flags | `VipMultiplier`, `VipFlags` |
+| Single away-from-zero rounding | the whole rounding rule |
+| `General.ShowPointMessages` and the per-player `!togglepointmsg` preference | **impossible** — the per-player flag is not on `IRanksApi` |
+| `RoundEndSummary` batching | **impossible** — the buffer is core-internal |
+
+The last two rows are why an arbiter must not print its own chat line: it would
+reach players who switched point messages off, and bypass round-end batching.
+
+`DisplayText` exists because `Reason` is not display-only — it is written to the
+detail log and carried on `RaisePointsChanged` (FR-API-04), which other modules
+consume. Translated prose there would make a module-facing identity change with the
+server's language, so the reason stays a stable key and the text travels beside it.
+
+---
+
 ## 12. Non-functional requirements
 
 | ID | Requirement |
@@ -1992,7 +2070,7 @@ The reasoning lives in the requirement each row points to; this is the index.
 | **Q7** | Generated points config, or in-memory defaults? | Dissolved with the registry. Core writes no config file at all. | §13 |
 | **Q8** | Ship a ladder, or an empty one? | The seven CS2 Premier bands, with Premier as the default scoreboard mode. Supersedes an earlier 18-entry resolution, which became an example file. | FR-RNK-01 |
 | **Q9** | Scale the kill reward dynamically too? | Yes, mirrored with death. | FR-PTS-05 |
-| **Q10** | Should combos suppress the base award? | Additive only; `Suppresses` deleted. An additive module cannot retract what core already multiplied. | FR-MOD-06 |
+| **Q10** | Should combos suppress the base award? | **Reversed 2026-10.** Was additive-only, because an additive module cannot retract what core already multiplied. That held only while the module saw the kill after core; FR-API-11 has core ask first, so nothing is retracted. Now opt-in via `SuppressCoreAwards`, and `Count > 1` may not use it. | FR-MOD-06, FR-API-11 |
 | **Q11** | Combos in config, or API-only? | Neither — combos left core entirely. | FR-MOD-06 |
 | **Q12** | Percentile rank thresholds? | Fixed thresholds only. Saturation documented rather than engineered around. | FR-RNK-01 |
 | **Q13** | Does `UseCoreRankingLogic = false` suppress third-party scoring? | No. Contention is an operator constraint, not core machinery. | FR-PTS-00 |

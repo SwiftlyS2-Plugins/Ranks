@@ -1,0 +1,24 @@
+{
+  // Ranks_CustomCombos - English.
+  //
+  // Must stay KEY-COMPLETE: a missing key renders the literal marker {lang}.{key} to the player
+  // rather than falling back to English.
+  //
+  // Keys named combo.<key> are YOURS to add — one per combo you configure. A combo with no key
+  // here still works; its chat line falls back to the bare combo name.
+
+  "command.combos.help": "Shows the combos you have landed.",
+
+  "combos.none": "{lightred}You have not landed any combos yet.",
+  "combos.header": "{lime}Your combos:",
+  "combos.row": " {grey}- {default}{0}{grey}: {lime}{1}",
+
+  // Matching the combos in resources/examples/combos.jsonc.
+  "combo.noscope_hs": "{lime}No-scope headshot",
+  "combo.wallbang_hs": "{lime}Wallbang headshot",
+  "combo.knife_hs": "{lime}Knife headshot",
+  "combo.airborne_sniper": "{lime}Airborne sniper kill",
+  "combo.blind_nade": "{lime}Blind grenade kill",
+  "combo.nade_double": "{lime}Grenade double kill",
+  "combo.long_noscope": "{lime}Long-range no-scope"
+}

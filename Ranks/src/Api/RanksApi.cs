@@ -233,6 +233,8 @@ internal sealed class RanksApi : IRanksApi
         }
     });
 
+    public void SetKillArbiter(IRanksKillArbiter? arbiter) => _awards.SetKillArbiter(arbiter);
+
     public bool ArePointsEnabled => _awards.ArePointsEnabled;
 
     public RanksPointSettings GetPointSettings()

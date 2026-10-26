@@ -1,0 +1,59 @@
+{
+  // Example combos for Ranks_CustomCombos.
+  //
+  // Copy the entries you want into the "Rules" object of config.jsonc. The module ships none by
+  // default on purpose: what a combination is worth is a balance decision, not a default.
+  //
+  // Every combo here has a matching combo.<key> entry in resources/translations/en.jsonc. Add one
+  // for any combo you invent, or its chat line falls back to the bare key.
+
+  "Combos": {
+    "SuppressCoreAwards": false,
+
+    "Rules": {
+      // Two attributes on one kill. Pays on top of core's kill + headshot + noscope.
+      "noscope_hs": {
+        "RequiresAll": [ "headshot", "noscope" ],
+        "Points": 10
+      },
+
+      "wallbang_hs": {
+        "RequiresAll": [ "headshot", "penetrated" ],
+        "Points": 15
+      },
+
+      // weapon_class covers every knife skin; weapon:weapon_ak47 would pin one gun instead.
+      "knife_hs": {
+        "RequiresAll": [ "headshot", "weapon_class:knife" ],
+        "Points": 50
+      },
+
+      "airborne_sniper": {
+        "RequiresAll": [ "attackerinair", "weapon_class:sniper" ],
+        "Points": 30
+      },
+
+      // RequiresNone keeps a combo honest: this one is for grenades thrown while blind, not for
+      // grenades that happened to kill someone who was blind.
+      "blind_nade": {
+        "RequiresAll": [ "attackerblind", "weapon_class:grenade" ],
+        "RequiresNone": [ "team_kill" ],
+        "Points": 40
+      },
+
+      // Count is SAME TICK only — one detonation killing two players, not two grenade kills in a
+      // round. Spread-over-time streaks are core's. Cannot be used with SuppressCoreAwards.
+      "nade_double": {
+        "RequiresAll": [ "weapon_class:grenade" ],
+        "Count": 2,
+        "Points": 75
+      },
+
+      // distance is in source units: 2000 is roughly 50 m.
+      "long_noscope": {
+        "RequiresAll": [ "noscope", "distance:2000" ],
+        "Points": 35
+      }
+    }
+  }
+}

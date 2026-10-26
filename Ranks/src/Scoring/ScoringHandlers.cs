@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Ranks.Config;
+using Ranks.Contract;
 using Ranks.Logging;
 using Ranks.Players;
 using SwiftlyS2.Shared;
@@ -309,30 +310,69 @@ internal sealed class ScoringHandlers
         if (attacker is null || selfInflicted) return;
 
         var victimIsBot = IsBot(e.UserIdPlayer);
+        var counterparty = victim?.SteamId;
+
+        var claim = _awards.ClaimKill(new RanksKillContext(
+            attacker.SteamId,
+            counterparty,
+            victimIsBot,
+            friendlyFire,
+            e.Weapon ?? string.Empty,
+            e.Distance,
+            (int)e.ActualHitGroup,
+            BuildAttributes(e, friendlyFire)));
+
+        var suppressed = claim is { SuppressCoreAwards: true };
 
         if (friendlyFire)
         {
-            _awards.Award(attacker, PointEvents.TeamKill, counterparty: victim?.SteamId, counterpartyIsBot: victimIsBot);
+            if (!suppressed)
+                _awards.Award(attacker, PointEvents.TeamKill, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+
+            if (claim is not null) _awards.AwardClaim(attacker, claim, counterparty, victimIsBot);
             return;
         }
 
-        var counterparty = victim?.SteamId;
+        if (!suppressed)
+        {
+            _awards.Award(attacker, PointEvents.Kill, counterparty: counterparty, counterpartyIsBot: victimIsBot, scaling: ScalingKind.Kill);
 
-        _awards.Award(attacker, PointEvents.Kill, counterparty: counterparty, counterpartyIsBot: victimIsBot, scaling: ScalingKind.Kill);
+            // The flat catalogue stacks: a knife headshot already scores kill + headshot + knife_kill.
+            // A value for the combination itself is Ranks_CustomCombos' job, not core's (FR-PTS-09).
+            if (e.Headshot) _awards.Award(attacker, PointEvents.Headshot, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+            if (e.NoScope) _awards.Award(attacker, PointEvents.NoScope, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+            if (e.Penetrated > 0) _awards.Award(attacker, PointEvents.Wallbang, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+            if (e.ThruSmoke) _awards.Award(attacker, PointEvents.ThroughSmoke, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+            if (e.AttackerBlind) _awards.Award(attacker, PointEvents.BlindKill, counterparty: counterparty, counterpartyIsBot: victimIsBot);
 
-        // The flat catalogue stacks: a knife headshot already scores kill + headshot + knife_kill.
-        // A value for the combination itself is Ranks_CustomCombos' job, not core's (FR-PTS-09).
-        if (e.Headshot) _awards.Award(attacker, PointEvents.Headshot, counterparty: counterparty, counterpartyIsBot: victimIsBot);
-        if (e.NoScope) _awards.Award(attacker, PointEvents.NoScope, counterparty: counterparty, counterpartyIsBot: victimIsBot);
-        if (e.Penetrated > 0) _awards.Award(attacker, PointEvents.Wallbang, counterparty: counterparty, counterpartyIsBot: victimIsBot);
-        if (e.ThruSmoke) _awards.Award(attacker, PointEvents.ThroughSmoke, counterparty: counterparty, counterpartyIsBot: victimIsBot);
-        if (e.AttackerBlind) _awards.Award(attacker, PointEvents.BlindKill, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+            if (e.Distance >= _config.Current.Points.LongDistanceUnits)
+                _awards.Award(attacker, PointEvents.LongDistance, counterparty: counterparty, counterpartyIsBot: victimIsBot);
 
-        if (e.Distance >= _config.Current.Points.LongDistanceUnits)
-            _awards.Award(attacker, PointEvents.LongDistance, counterparty: counterparty, counterpartyIsBot: victimIsBot);
+            AwardWeaponClass(attacker, e.Weapon, counterparty, victimIsBot);
+        }
 
-        AwardWeaponClass(attacker, e.Weapon, counterparty, victimIsBot);
+        if (claim is not null) _awards.AwardClaim(attacker, claim, counterparty, victimIsBot);
+
+        // Never suppressed: a streak is a property of the player's round, not of this kill.
         AwardKillstreak(attacker);
+    }
+
+    private static IReadOnlySet<string> BuildAttributes(EventPlayerDeath e, bool friendlyFire)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+
+        if (e.Headshot) set.Add(RanksKillAttributes.Headshot);
+        if (e.NoScope) set.Add(RanksKillAttributes.NoScope);
+        if (e.ThruSmoke) set.Add(RanksKillAttributes.ThruSmoke);
+        if (e.AttackerBlind) set.Add(RanksKillAttributes.AttackerBlind);
+        if (e.AttackerInAir) set.Add(RanksKillAttributes.AttackerInAir);
+        if (e.AssistedFlash) set.Add(RanksKillAttributes.AssistedFlash);
+        if (e.Penetrated > 0) set.Add(RanksKillAttributes.Penetrated);
+        if (e.Dominated > 0) set.Add(RanksKillAttributes.Dominated);
+        if (e.Revenge > 0) set.Add(RanksKillAttributes.Revenge);
+        if (friendlyFire) set.Add(RanksKillAttributes.TeamKill);
+
+        return set;
     }
 
     private void AwardAssister(EventPlayerDeath e, PlayerRecord? assister, PlayerRecord? attacker, PlayerRecord? victim)
