@@ -70,6 +70,9 @@ Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
 
 ### Example Configuration
 
+<details open>
+<summary>Default <code>config.jsonc</code></summary>
+
 ```jsonc
 {
   "WeaponStats": {
@@ -78,12 +81,36 @@ Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
       "CountAgainstBots": false,
       "CountFromBots": false
     },
-    "Database": { "FlushIntervalSeconds": 120 },
-    "Display": { "TopWeapons": 10, "MinShotsToList": 10 },
-    "General": { "DetailedLogging": false }
+    "Database": {
+      "FlushIntervalSeconds": 120
+    },
+    "Display": {
+      "TopWeapons": 10,
+      "MinShotsToList": 10
+    },
+    "General": {
+      "DetailedLogging": false
+    }
   }
 }
 ```
+
+</details>
+
+<details open>
+<summary>Default <code>commands.jsonc</code></summary>
+
+```jsonc
+{
+  "Commands": {
+    "All": {
+      "weaponstats": { "Command": "weaponstats", "Aliases": [ "ws" ], "Permission": "" }
+    }
+  }
+}
+```
+
+</details>
 
 ### Friendly fire — match this to your game mode
 

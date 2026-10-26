@@ -119,6 +119,47 @@ Config file: `addons/swiftlys2/plugins/Ranks_CustomCombos/config.jsonc`
 
 ### Example Configuration
 
+<details open>
+<summary>Default <code>config.jsonc</code></summary>
+
+```jsonc
+{
+  "Combos": {
+    "SuppressCoreAwards": false,
+
+    // Empty on purpose. What a combination is worth is a balance decision, not a default.
+    "Rules": {},
+
+    "Database": {
+      "FlushIntervalSeconds": 120
+    },
+    "General": {
+      "DetailedLogging": false
+    }
+  }
+}
+```
+
+</details>
+
+<details open>
+<summary>Default <code>commands.jsonc</code></summary>
+
+```jsonc
+{
+  "Commands": {
+    "All": {
+      "combos": { "Command": "combos", "Aliases": [ "mycombos" ], "Permission": "" }
+    }
+  }
+}
+```
+
+</details>
+
+<details open>
+<summary>Two combos, for reference</summary>
+
 ```jsonc
 {
   "Combos": {
@@ -137,6 +178,8 @@ Config file: `addons/swiftlys2/plugins/Ranks_CustomCombos/config.jsonc`
   }
 }
 ```
+
+</details>
 
 Add a `combo.<name>` entry to `resources/translations/en.jsonc` for each combo. A
 missing key falls back to the bare combo name rather than printing a `{lang}.{key}`

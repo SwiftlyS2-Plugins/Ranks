@@ -107,7 +107,8 @@ the command entirely.
 
 ## Configuration
 
-Four files, all created on first load, all reloaded on save.
+Four files, all created on first load, all reloaded on save. Each is generated from core's own
+model with explanatory comments; the values below are what ships.
 
 | File | Holds |
 |------|-------|
@@ -117,6 +118,67 @@ Four files, all created on first load, all reloaded on save.
 | `commands.jsonc` | Command names, aliases and permissions |
 
 ### `config.jsonc`
+
+<details open>
+<summary>Default <code>config.jsonc</code></summary>
+
+```jsonc
+{
+  "Ranks": {
+    "Database": {
+      "Connection": "default",
+      "TablePrefix": "",
+      "TableSuffix": "",
+      "SaveIntervalSeconds": 300,
+      "PurgeDays": 0,
+      "MaintenanceIntervalHours": 0
+    },
+    "Rank": {
+      "UseCoreRankingLogic": true,
+      "MinPlayers": 4,
+      "MinPoints": 0,
+      "StartPoints": 0,
+      "WarmupPoints": false,
+      "PointsForBots": false,
+      "FfaMode": false
+    },
+    "Scoreboard": {
+      "RankMode": "Premier",
+      "ScoreSync": false,
+      "Clantags": true,
+      "SkillGroupOffset": 0,
+      "CustomRankBase": 0,
+      "CustomRankMax": 18,
+      "CustomRankMargin": 0
+    },
+    "Points": {
+      "DynamicKillPoints": true,
+      "DynamicKillMin": 0.5,
+      "DynamicKillMax": 3.0,
+      "DynamicDeathPoints": true,
+      "DynamicDeathMin": 0.5,
+      "DynamicDeathMax": 3.0,
+      "LongDistanceUnits": 2000,
+      "SecondsBetweenKills": 0,
+      "KillstreakResetOnRoundEnd": true,
+      "ShowPlayerNames": false,
+      "KillStreaksEnabled": true,
+      "RoundEndSummary": false,
+      "ShowPointMessages": true,
+      "ShowRankChangeMessages": true
+    },
+    "Vip": {
+      "Multiplier": 1.25,
+      "Flags": [ "@ranks/vip" ]
+    },
+    "General": {
+      "DetailedLogging": false
+    }
+  }
+}
+```
+
+</details>
 
 #### Database
 
@@ -197,11 +259,129 @@ icon instead, so it wants an 18-band ladder; one ships at
 One entry per event — 33 of them, plus eleven killstreak tiers. A value of `0` disables the event
 and its chat line, but **not** its stat increment.
 
+<details open>
+<summary>Default <code>points.jsonc</code></summary>
+
+```jsonc
+{
+  "Points": {
+    "Values": {
+      "core.kill": 2,
+      "core.death": -3,
+      "core.assist": 1,
+      "core.assist_flash": 1,
+      "core.headshot": 3,
+      "core.suicide": 0,
+      "core.team_kill": 0,
+      "core.team_assist": 0,
+      "core.noscope": 5,
+      "core.wallbang": 4,
+      "core.through_smoke": 3,
+      "core.blind_kill": 3,
+      "core.long_distance": 3,
+      "core.knife_kill": 5,
+      "core.taser_kill": 5,
+      "core.grenade_kill": 5,
+      "core.inferno_kill": 5,
+      "core.impact_kill": 5,
+      "core.bomb_plant": 10,
+      "core.bomb_defuse": 10,
+      "core.bomb_defuse_others": 10,
+      "core.bomb_exploded": 10,
+      "core.bomb_pickup": 2,
+      "core.bomb_drop": -2,
+      "core.hostage_rescue": 10,
+      "core.hostage_rescue_all": 10,
+      "core.hostage_hurt": 0,
+      "core.hostage_kill": -20,
+      "core.round_win": 2,
+      "core.round_lose": -2,
+      "core.mvp": 10,
+      "core.match_win": 15,
+      "core.match_lose": -5,
+
+      // Killstreak tiers: 2 kills through 12-or-more, all in one round.
+      "core.streak_double": 5,
+      "core.streak_triple": 6,
+      "core.streak_domination": 7,
+      "core.streak_rampage": 8,
+      "core.streak_mega": 9,
+      "core.streak_ownage": 10,
+      "core.streak_ultra": 11,
+      "core.streak_killing_spree": 12,
+      "core.streak_monster": 13,
+      "core.streak_unstoppable": 14,
+      "core.streak_godlike": 15
+    }
+  }
+}
+```
+
+</details>
+
 ### `ranks.jsonc`
 
 The rank tiers, each with a name, tag, colour and point threshold. The first tier must start at
 `0`. Ships as a seven-band Premier ladder; an 18-band Competitive one is in
 `resources/examples/ranks-competitive.jsonc`.
+
+<details open>
+<summary>Default <code>ranks.jsonc</code></summary>
+
+```jsonc
+{
+  "Ladder": {
+    "Tiers": [
+      { "Name": "Grey", "Tag": "Grey", "Color": "grey", "Hex": "#B0C3D9", "Points": 0, "SkillGroup": 1 },
+      { "Name": "Light Blue", "Tag": "LtBlue", "Color": "lightblue", "Hex": "#5E98D9", "Points": 5000, "SkillGroup": 4 },
+      { "Name": "Blue", "Tag": "Blue", "Color": "blue", "Hex": "#4B69FF", "Points": 10000, "SkillGroup": 7 },
+      { "Name": "Purple", "Tag": "Purple", "Color": "purple", "Hex": "#8847FF", "Points": 15000, "SkillGroup": 10 },
+      { "Name": "Pink", "Tag": "Pink", "Color": "magenta", "Hex": "#D32CE6", "Points": 20000, "SkillGroup": 13 },
+      { "Name": "Red", "Tag": "Red", "Color": "red", "Hex": "#EB4B4B", "Points": 25000, "SkillGroup": 16 },
+      { "Name": "Gold", "Tag": "Gold", "Color": "gold", "Hex": "#CAAB05", "Points": 30000, "SkillGroup": 18 }
+    ]
+  }
+}
+```
+
+</details>
+
+### `commands.jsonc`
+
+Every command's name, aliases and permission. An empty `Command` removes it; an empty `Permission`
+means everyone.
+
+<details open>
+<summary>Default <code>commands.jsonc</code></summary>
+
+```jsonc
+{
+  "Commands": {
+    "All": {
+      "rank":           { "Command": "rank",           "Aliases": [ "myrank" ],   "Permission": "" },
+      "ranks":          { "Command": "ranks",          "Aliases": [ "ranklist" ], "Permission": "" },
+      "top":            { "Command": "top",            "Aliases": [ "ranktop" ],  "Permission": "" },
+      "stats":          { "Command": "stats",          "Aliases": [ "mystats" ],  "Permission": "" },
+      "settings":       { "Command": "settings",       "Aliases": [ "options" ],  "Permission": "" },
+      "resetmyrank":    { "Command": "resetmyrank",    "Aliases": [],             "Permission": "" },
+      "togglepointmsg": { "Command": "togglepointmsg", "Aliases": [],             "Permission": "" },
+
+      "setpoints":      { "Command": "setpoints",      "Aliases": [], "Permission": "ranks.admin" },
+      "givepoints":     { "Command": "givepoints",     "Aliases": [], "Permission": "ranks.admin" },
+      "removepoints":   { "Command": "removepoints",   "Aliases": [], "Permission": "ranks.admin" },
+      "resetrank":      { "Command": "resetrank",      "Aliases": [], "Permission": "ranks.admin" }
+    }
+  }
+}
+```
+
+</details>
+
+> [!NOTE]
+> **Aliases are appended to the defaults, not replaced.** The config binder adds the file's
+> entries onto the model's own, so an alias cannot be removed by deleting its line — the default
+> comes back. Core de-duplicates the result, so the shipped file binding each alias twice is
+> harmless. To retire a command entirely, set its `Command` to `""`.
 
 ---
 

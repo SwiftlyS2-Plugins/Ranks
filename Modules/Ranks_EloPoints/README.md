@@ -80,6 +80,9 @@ Config file: `addons/swiftlys2/plugins/Ranks_EloPoints/config.jsonc`
 
 ### Example Configuration
 
+<details open>
+<summary>Default <code>config.jsonc</code></summary>
+
 ```jsonc
 {
   "EloPoints": {
@@ -90,11 +93,19 @@ Config file: `addons/swiftlys2/plugins/Ranks_EloPoints/config.jsonc`
       "ConfidenceRounds": 10,
       "ExpectedRounds": 24
     },
-    "Abandon": { "Penalty": 25 },
-    "General": { "DetailedLogging": false }
+    "Abandon": {
+      "Penalty": 25
+    },
+    "General": {
+      "DetailedLogging": false
+    }
   }
 }
 ```
+
+</details>
+
+This module ships no `commands.jsonc` — it registers no commands of its own.
 
 ### Read from core instead of configured here
 

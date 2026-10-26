@@ -64,6 +64,9 @@ Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
 
 ### Example Configuration
 
+<details open>
+<summary>Default <code>config.jsonc</code></summary>
+
 ```jsonc
 {
   "Prestige": {
@@ -71,13 +74,55 @@ Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
     "TagPrefix": "[P{0}] ",
     "Levels": [
       { "Level": 1, "MinimumPoints": 40000, "RankMode": "" },
-      { "Level": 2, "MinimumPoints": 80000, "RankMode": "Competitive" },
-      { "Level": 3, "MinimumPoints": 120000, "RankMode": "Wingman" }
+      { "Level": 2, "MinimumPoints": 80000, "RankMode": "" },
+      { "Level": 3, "MinimumPoints": 120000, "RankMode": "" },
+      { "Level": 4, "MinimumPoints": 160000, "RankMode": "" },
+      { "Level": 5, "MinimumPoints": 200000, "RankMode": "" }
     ],
     "DetailedLogging": false
   }
 }
 ```
+
+</details>
+
+<details open>
+<summary>Default <code>commands.jsonc</code></summary>
+
+```jsonc
+{
+  "Commands": {
+    "All": {
+      "prestige": { "Command": "prestige", "Aliases": [ "myprestige" ], "Permission": "" }
+    }
+  }
+}
+```
+
+</details>
+
+<details open>
+<summary>Progressing through scoreboard modes</summary>
+
+```jsonc
+{
+  "Prestige": {
+    "Levels": [
+      { "Level": 1, "MinimumPoints": 40000,  "RankMode": "" },
+      { "Level": 2, "MinimumPoints": 80000,  "RankMode": "Competitive" },
+      { "Level": 3, "MinimumPoints": 120000, "RankMode": "Wingman" },
+      { "Level": 4, "MinimumPoints": 160000, "RankMode": "DangerZone" },
+      { "Level": 5, "MinimumPoints": 200000, "RankMode": "Custom" }
+    ]
+  }
+}
+```
+
+An empty `RankMode` keeps core's configured mode, so level 1 above stays on whatever
+`Scoreboard.RankMode` is set to. `Custom` additionally reads core's
+`Scoreboard.CustomRankBase` / `CustomRankMax` / `CustomRankMargin`.
+
+</details>
 
 ### `MinimumPoints` is both the threshold and the deduction
 
