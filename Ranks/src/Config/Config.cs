@@ -62,8 +62,8 @@ public sealed class RankOptions
     public bool WarmupPoints { get; set; } = false;
 
     /// <remarks>
-    /// Gates the <em>award</em> only. A bot kill still increments the stat counters either
-    /// way, because counters are facts rather than judgements (FR-PTS-03).
+    /// Unlike the context gates, this suppresses the <em>stat counters</em> as well as the
+    /// award: a bot is not a player, so a kill on one is not a fact about play (FR-PTS-03).
     /// </remarks>
     public bool PointsForBots { get; set; } = false;
 
