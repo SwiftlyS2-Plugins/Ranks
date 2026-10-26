@@ -215,6 +215,7 @@ A new core preference is a new column and a new migration. That is deliberate �
 core's preference set is small and known, and a key/value table here would exist
 only to serve modules that now own their own storage anyway.
 
+> [!WARNING]
 > No column or table may be named `rank` — it is reserved in MySQL 8.
 
 ### FR-DB-05 — Schema versioning and migrations
@@ -1026,7 +1027,8 @@ FR-RNK-01 legible: CS2 renders `CompetitiveRanking` as the number itself and
 colours it by its own band, so the player sees continuous movement every round
 rather than an icon that changes twice a season. Nothing needs to map.
 
-> ⚠️ **The `RankMode` → `m_iCompetitiveRankType` numeric mapping above is
+> [!WARNING]
+> **The `RankMode` → `m_iCompetitiveRankType` numeric mapping above is
 > unverified.** `m_iCompetitiveRankType` is a networked `signed char` on
 > `CCSPlayerController` (confirmed in the current schema dump), but the engine
 > values its modes take are *not* `0`–`4`, and the table is a plugin-level enum
@@ -1191,6 +1193,10 @@ Per-weapon and per-hitbox tracking.
   against the module's own ledger (FR-DB-05).
 - Commands: `!weaponstats` / `!ws`, `!hitstats` / `!hs`, owned by the module —
   core's menu does not list them (FR-CMD-04).
+  > **Gap:** `!hitstats` is **not implemented**. The hitgroup counters are
+  > collected, stored and exposed through `IWeaponStatsApi.GetHitGroupsAsync`,
+  > but `StatsCommands.RegisterAll` registers only the `WeaponStats` key, so
+  > nothing prints them in chat.
 - Each table needs a real PK on its natural key. Without one, MySQL's
   `ON DUPLICATE KEY UPDATE` silently inserts duplicates forever while
   PostgreSQL and SQLite reject the statement outright.

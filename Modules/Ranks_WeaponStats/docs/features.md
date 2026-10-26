@@ -53,7 +53,8 @@ is excluded here exactly as `core.team_kill` keeps it out of
 it would be incoherent, and counting it on a team server makes a kills
 leaderboard farmable.
 
-> ⚠️ **The switch must match the game mode, and the failure is silent.** Left
+> [!WARNING]
+> **The switch must match the game mode, and the failure is silent.** Left
 > `false` on an FFA server, where everyone shares a team, the module records
 > almost nothing — which reads as a broken plugin, not a setting. Core carries
 > the same distinction in `Rank.FfaMode`; the module reads it through
@@ -240,10 +241,15 @@ keep their own names, because there is no `weapon_world` entity to point at.
 
 ## 5. Commands
 
-`!weaponstats` / `!ws` and `!hitstats` / `!hs`, owned by the module. Names,
-aliases and permissions come from the module's own `commands.jsonc`, following
-core's FR-CMD-01 shape, so the module registers them at runtime through
-`Core.Command.RegisterCommand` rather than by attribute.
+`!weaponstats` / `!ws`, owned by the module. Names, aliases and permissions come
+from the module's own `commands.jsonc`, following core's FR-CMD-01 shape, so the
+module registers them at runtime through `Core.Command.RegisterCommand` rather
+than by attribute.
+
+**Hitgroup totals have no command.** They are collected, stored in
+`ranks_hit_stats` and exposed through `IWeaponStatsApi.GetHitGroupsAsync`, but
+nothing prints them in chat — `StatsCommands.RegisterAll` registers only the
+`WeaponStats` key.
 
 ---
 

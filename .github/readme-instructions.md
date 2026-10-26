@@ -300,6 +300,35 @@ A: This is designed for community servers. Official matchmaking servers are not 
 
 ## Styling Best Practices
 
+### Notices
+
+Use [GitHub alert syntax](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts), never a bold line or a bare emoji. GitHub renders its own icon and colour, so **do not prefix the text with ⚠️ or ℹ️** — that double-renders the severity.
+
+Three types, and only three. Anything that is not a warning, a bug or a critical failure is info:
+
+```markdown
+> [!WARNING]
+> A mistake they are likely to make, and what it costs them.
+
+> [!CAUTION]
+> A bug, or a destructive / silently-wrong outcome.
+
+> [!NOTE]
+> Everything else. Info.
+```
+
+`[!IMPORTANT]` and `[!TIP]` are deliberately unused. Both collapse into info in
+practice, and four severities means a reader has to learn a scale instead of
+reacting to one.
+
+**Not every blockquote is a notice.** Promote one to an alert when it tells the
+reader to do or avoid something, or names a consequence. Leave it a plain `>`
+blockquote when it explains *why* a decision was made, or carries metadata and
+cross-references — design docs use blockquotes structurally, and boxing those
+turns the page into a wall of colour where nothing stands out.
+
+Keep alerts rare for the same reason. Five in one README means none of them is read.
+
 ### ✅ Do's
 - Use tables for structured data (commands, config, troubleshooting)
 - Include visual hierarchy (##, ###, **bold**, `code`)
@@ -308,6 +337,7 @@ A: This is designed for community servers. Official matchmaking servers are not 
 - Use bullet points for lists
 - Include code blocks with language hints (```csharp, ```json)
 - Add emoji sparingly for visual breaks (🎯 ⚡ 🔧 📊)
+- Use GitHub alerts for notices — `[!WARNING]`, `[!CAUTION]`, `[!NOTE]`
 
 ### ❌ Don'ts
 - Don't write walls of text
@@ -316,6 +346,8 @@ A: This is designed for community servers. Official matchmaking servers are not 
 - Don't forget default values
 - Don't use technical jargon without context
 - Don't skip the "How It Works" section for complex plugins
+- Don't fake an alert with a bold line, a bare blockquote or a ⚠️ prefix
+- Don't use `[!IMPORTANT]` or `[!TIP]` — they are info
 
 ---
 

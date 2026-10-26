@@ -2,15 +2,22 @@
 
 Per-weapon and per-hitbox statistics for the [Ranks](../../README.md) plugin.
 
-Tracks what each player does with each weapon — shots, hits, damage, kills,
-deaths, headshots — and where their bullets land, broken down by hitgroup.
+---
 
-**It awards no points and does not affect ranks.** Installing or removing it
-leaves core's ladder untouched.
+## Features
+
+- 🔫 **Per-weapon totals** - shots, hits, damage, kills, deaths and headshots for every gun
+- 🎯 **Hitbox breakdown** - where your bullets actually land, by hitgroup
+- 📊 **In-game command** - `!weaponstats`, configurable name and permission
+- 🤖 **Bot and friendly-fire switches** - count them or not, per game mode
+- 🔌 **Published API** - other plugins read the same totals
+
+**It awards no points and does not affect ranks.** Installing or removing it leaves
+core's ladder untouched.
 
 ---
 
-## Requires
+## Requirements
 
 - `Ranks` core installed and loaded
 - A SwiftlyS2 database connection — the same one core uses, named in **core's**
@@ -20,146 +27,171 @@ The module creates its own tables on that connection and never touches core's.
 
 ---
 
-## Install
+## Installation
 
 1. Drop the module into your plugins directory alongside `Ranks`.
 2. Start the server once. Core creates the tables on first load.
-3. Check the console for `Ranks_WeaponStats` — a missing `Ranks` is reported
-   there, and the module stays idle rather than failing the server.
+3. Check the console for `Ranks_WeaponStats` — a missing `Ranks` is reported there,
+   and the module stays idle rather than failing the server.
 
 ---
 
 ## Commands
 
-| Command | Aliases | Shows |
-|---|---|---|
-| `!weaponstats` | `!ws` | your per-weapon table, best weapon first |
-| `!hitstats` | `!hs` | where your shots land, by hitgroup |
+### Player Commands
 
-Names, aliases and permissions are configurable — see below. Both are
-module-owned; they do not appear in core's `!rank` menu.
+| Command | Aliases | Permission | Description |
+|---------|---------|------------|-------------|
+| `!weaponstats` | `!ws` | None | Your per-weapon table, best weapon first |
+
+Name, aliases and permission are editable in `commands.jsonc`. An empty `Command`
+removes the command. It is module-owned and does not appear in core's `!rank` menu.
+
+> [!NOTE]
+> **Hitgroup totals have no command.** They are collected and stored, and reachable
+> through `GetHitGroupsAsync` on the published API, but nothing in this module prints
+> them in chat.
 
 ---
 
 ## Configuration
 
-Two files, both created on first load.
+Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
 
-### `config.jsonc`
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `Tracking.CountFriendlyFire` | bool | `false` | Count hits, damage, hitgroups and kills against players on your own team |
+| `Tracking.CountAgainstBots` | bool | `false` | Count hits, damage, kills, headshots and hitgroups when the **victim** is a bot |
+| `Tracking.CountFromBots` | bool | `false` | Count deaths when the **killer** is a bot |
+| `Database.FlushIntervalSeconds` | int | `120` | How often counters are written; `0` flushes only on disconnect, map change and unload |
+| `Display.TopWeapons` | int | `10` | Rows in the `!weaponstats` list |
+| `Display.MinShotsToList` | int | `10` | Hides weapons barely touched, so one stray pistol shot does not fill the table |
+| `General.DetailedLogging` | bool | `false` | Narrates expected flow; warnings and errors print regardless |
 
-| Key | Default | Meaning |
-|---|---|---|
-| `Tracking.CountFriendlyFire` | `false` | Count hits, damage, hitgroups and kills against **players on your own team**. |
-| `Tracking.CountAgainstBots` | `false` | Count hits, damage, kills, headshots and hitgroups when the **victim** is a bot. Match this to core's `Rank.PointsForBots`. |
-| `Tracking.CountFromBots` | `false` | Count deaths when the **killer** is a bot. Match this to core's `Rank.PointsForBots`. |
-| `Database.FlushIntervalSeconds` | `120` | How often accumulated counters are written. Lower loses less on a crash and writes more often. `0` disables the timer — counters then flush only on disconnect, map change and unload. |
-| `Display.TopWeapons` | `10` | Rows in the `!weaponstats` list. |
-| `Display.MinShotsToList` | `10` | Hides weapons you have barely touched, so one stray pistol shot does not fill the table. |
-| `General.DetailedLogging` | `false` | Narrates expected flow. Warnings and errors print regardless. |
+### Example Configuration
 
-#### Friendly fire — set this to match your game mode
+```jsonc
+{
+  "WeaponStats": {
+    "Tracking": {
+      "CountFriendlyFire": false,
+      "CountAgainstBots": false,
+      "CountFromBots": false
+    },
+    "Database": { "FlushIntervalSeconds": 120 },
+    "Display": { "TopWeapons": 10, "MinShotsToList": 10 },
+    "General": { "DetailedLogging": false }
+  }
+}
+```
+
+### Friendly fire — match this to your game mode
 
 **On a normal team server leave it `false`.** Shooting a teammate is not combat
-performance, and counting it lets someone pad their damage and accuracy on
-their own side.
+performance, and counting it lets someone pad damage and accuracy on their own side.
 
-**On an FFA or deathmatch server set it `true`.** Everyone is typically on one
-team there, so with it `false` the module sees nearly every kill as friendly
-fire and records **almost nothing**. Core has the matching switch in
-`Rank.FfaMode`; set both the same way.
+**On an FFA or deathmatch server set it `true`.** Everyone is typically on one team
+there, so with it `false` the module sees nearly every kill as friendly fire and
+records **almost nothing**. Core has the matching switch in `Rank.FfaMode`; set both
+the same way.
 
+> [!NOTE]
 > The module warns once at startup if core reports FFA mode while this is still
-> `false`, because the symptom otherwise looks like a broken plugin rather than
-> a setting.
+> `false` — the symptom otherwise looks like a broken plugin rather than a setting.
 
-**Self damage is never counted** — your own grenade or molotov on yourself —
-and that is not configurable under any mode. **Deaths are never filtered by
-this switch either**: being killed by a teammate is still a death, and it still
-counts.
+**Self damage is never counted** under any mode, and **deaths are never filtered by
+this switch**: being killed by a teammate is still a death.
 
-#### The two bot switches
+### The two bot switches
 
-They are independent on purpose — set either, both or neither. The usual reason
-to split them is a practice or deathmatch server where bot kills are padding but
-deaths to bots are still worth knowing about, or the reverse.
+Independent on purpose — set either, both or neither. The usual reason to split them
+is a practice server where bot kills are padding but deaths to bots still matter.
 
-**Both default to `false`, matching core's `Rank.PointsForBots`.** Core gates bot
-kills, deaths and assists out of `ranks_players` entirely (FR-PTS-03) — a bot is
-not a player, so a kill on one is not a fact about play. At the shipped defaults
-this module's totals therefore reconcile with core's:
+**Both default to `false`, matching core's `Rank.PointsForBots`.** At the shipped
+defaults this module's totals reconcile with core's:
 
 ```
 SUM(ranks_weapon_stats.kills) per player  ==  ranks_players.kills
 ```
 
-**Setting either switch independently of core's breaks that.** `!weaponstats`
-will then disagree with `!stats`, and that is the operator's choice rather than
-a bug — but it is worth knowing before the first player reports it.
+Setting either switch independently of core's breaks that, and `!weaponstats` will
+disagree with `!stats`. That is an operator choice rather than a bug — but worth
+knowing before the first player reports it.
 
-> ⚠️ **`CountAgainstBots = false` makes accuracy read low.** Shots come from
-> `weapon_fire`, which has no victim at all, so they cannot be filtered — shots
-> at bots still count while the resulting hits do not. On a bot-heavy server the
-> hits-per-shot ratio becomes meaningless. Nothing can fix this; the event does
-> not carry a target. Turn both switches **on** (alongside core's
-> `PointsForBots`) if you run bots and care about accuracy.
+> [!WARNING]
+> **`CountAgainstBots = false` makes accuracy read low.** Shots come from
+> `weapon_fire`, which has no victim and therefore cannot be filtered — shots at bots
+> count while the resulting hits do not. Nothing can fix this; the event carries no
+> target. Turn both switches **on** (alongside core's `PointsForBots`) if you run
+> bots and care about accuracy.
 
-Neither switch affects bots' *own* rows: a bot never gets stats of its own under
-any setting, because it has no SteamID64 to key them to (FR-DB-07).
+Neither switch affects bots' *own* rows: a bot never gets stats of its own, because
+it has no SteamID64 to key them to.
 
-### `commands.jsonc`
+---
 
-Same shape as core's. Each command takes a name, aliases and a permission:
+## How It Works
 
-```jsonc
+**Overview**
+
+Every shot, hit and death is accumulated in memory per player, then written to the
+database in batches.
+
+**Collection**
+
+`weapon_fire` increments shots, `player_hurt` adds hits, damage and the hitgroup, and
+`player_death` records kills, headshots and deaths. The tracking switches decide which
+of those count; the shot counter is the one that cannot be filtered, since the fire
+event names no victim.
+
+**Persistence**
+
+Counters flush on the timer, on disconnect, on map change and on unload. Writes are
+**additive** rather than absolute, so two servers sharing one database accumulate
+instead of overwriting each other, and nothing has to be read back when a player
+connects.
+
+**Reading**
+
+`!weaponstats` and the API both merge the stored rows with the caller's unflushed
+session delta, so a figure never lags a flush interval behind what just happened.
+`Display.TopWeapons` and `Display.MinShotsToList` shape the chat table only; the API
+returns every row.
+
+---
+
+## For plugin developers
+
+The module publishes `Ranks.WeaponStats.Api.v1`. Reference
+`Ranks_WeaponStats.Contract.dll` from this module's `resources/exports/` — **do not
+copy it next to your plugin**, or the host loads a second one, the interface gets two
+type identities, and binding silently stops matching.
+
+```csharp
+public interface IWeaponStatsApi
 {
-  "weaponstats": { "name": "weaponstats", "aliases": ["ws"], "permission": "" },
-  "hitstats":    { "name": "hitstats",    "aliases": ["hs"], "permission": "" }
+    const string InterfaceKey = "Ranks.WeaponStats.Api.v1";
+
+    Task<IReadOnlyList<WeaponStatRow>> GetWeaponsAsync(ulong steamId);
+    Task<IReadOnlyList<HitGroupStatRow>> GetHitGroupsAsync(ulong steamId);
+    Task<WeaponStatRow?> GetWeaponAsync(ulong steamId, string weapon);
 }
 ```
 
-An empty `permission` means everyone. **Renames take effect on restart**, not on
-file reload.
-
-> Check names against your other plugins before changing them. The first plugin
-> to register a command wins silently, and the loser simply never fires.
+`Weapon` is the entity designer name (`weapon_ak47`, not `ak47`); `GetWeaponAsync`
+normalises either spelling. `HitGroup` is the raw `HitGroup_t` value, which is not a
+dense range — `0` through `11` with a hole at `9`.
 
 ---
 
-## What gets stored
+## Troubleshooting
 
-Two tables, carrying whatever prefix and suffix core is configured with:
-
-| Table | Key | Holds |
-|---|---|---|
-| `ranks_weapon_stats` | `(steam_id, weapon)` | shots, hits, damage, kills, deaths, headshots |
-| `ranks_hit_stats` | `(steam_id, hitgroup)` | hits and damage you have **dealt** to each hitbox |
-
-`weapon` holds the entity designer name — `weapon_ak47`, not `ak47` — so it
-joins directly against CS2's own weapon names. Non-weapon death sources keep
-theirs: `world`, `planted_c4`, `inferno`, `trigger_hurt`.
-
-Bots are never stored, matching core.
-
-**Friendly fire and self damage are never counted** — not hits, damage,
-hitgroups or kills. Deaths are the exception and count whatever killed you,
-including a teammate. Damage is health only; armour absorbed is not recorded.
-On an FFA server the friendly-fire exclusion switches itself off, or it would
-hide every kill.
-
-Rows are removed when core purges a player (FR-DB-08), so the module's data
-follows core's retention policy rather than growing forever on its own.
-
----
-
-## Notes for operators
-
-- **Counters are written additively.** Two servers sharing one database
-  accumulate into the same rows instead of overwriting each other — but that
-  also means they share one set of totals. Use core's table prefix to separate
-  them if you want per-server stats.
-- **The bot switches change what is recorded, not what is displayed.** Turning
-  one off stops new rows accruing; it does not hide or remove what was already
-  counted while it was on.
-- **Shot counts depend on a game event Valve may change.** `weapon_fire` lives
-  only in `mod.gameevents`. If a CS2 update stops firing it, shots and accuracy
-  go flat while kills and damage keep working.
+| Problem | Possible Cause | Solution |
+|---------|----------------|----------|
+| "this module is idle" at startup | Ranks is not installed | Install Ranks alongside it |
+| Almost nothing is recorded | FFA server with `CountFriendlyFire` off | Set it `true`, and core's `Rank.FfaMode` to match |
+| Accuracy looks far too low | Bots on the server with `CountAgainstBots` off | Turn both bot switches on, with core's `PointsForBots` |
+| `!weaponstats` disagrees with `!stats` | Bot switches differ from core's `PointsForBots` | Set all three the same way |
+| Stats lost after a crash | Flush interval too long | Lower `Database.FlushIntervalSeconds` |
+| No tables created | Core could not reach the database | Check core's connection name and the startup log |
+| `!hitstats` does nothing | It does not exist | Hitgroup totals are API-only; see the note under Commands |

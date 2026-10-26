@@ -40,7 +40,8 @@ Tables are created on first load. There is nothing to import by hand.
 3. Restart the server. Core creates its tables and runs any module migrations.
 4. Four config files appear on first load — see below.
 
-> ⚠️ **An unknown `Database.Connection` is a hard failure, deliberately.** SwiftlyS2 would
+> [!NOTE]
+> **An unknown `Database.Connection` is a hard failure, deliberately.** SwiftlyS2 would
 > silently fall back to the default connection, which means a typo quietly writes every rank to the
 > wrong database. Core opens the named connection at boot and refuses to start instead.
 
@@ -112,6 +113,7 @@ Prefix and suffix are normalised to one underscore, so `awp`, `awp_` and `_awp` 
 | `Rank.PointsForBots` | bool | `false` | Count kills, deaths and assists involving bots |
 | `Rank.FfaMode` | bool | `false` | Suppress team-damage penalties on free-for-all servers |
 
+> [!NOTE]
 > **`PointsForBots` is not like the other gates.** `MinPlayers`, `WarmupPoints` and `FfaMode`
 > suppress the *award* and still record the kill — those happened between real players. With
 > `PointsForBots` off, bot kills, deaths and assists are **not recorded at all**, because a bot is
@@ -161,11 +163,11 @@ icon instead, so it wants an 18-band ladder; one ships at
 One entry per event — 33 of them, plus eleven killstreak tiers. A value of `0` disables the event
 and its chat line, but **not** its stat increment.
 
-### `ladder.jsonc`
+### `ranks.jsonc`
 
 The rank tiers, each with a name, tag, colour and point threshold. The first tier must start at
 `0`. Ships as a seven-band Premier ladder; an 18-band Competitive one is in
-`resources/examples/`.
+`resources/examples/ranks-competitive.jsonc`.
 
 ---
 
@@ -204,11 +206,61 @@ commands. At most one absolute module may run at a time; core does not police th
 
 | Module | Kind | What it adds |
 |--------|------|--------------|
-| [Ranks_WeaponStats](Modules/Ranks_WeaponStats) | data | Per-weapon and per-hitbox statistics, with `!weaponstats` and `!hitstats` |
+| [Ranks_WeaponStats](Modules/Ranks_WeaponStats) | data | Per-weapon and per-hitbox statistics, with `!weaponstats` |
 | [Ranks_EloPoints](Modules/Ranks_EloPoints) | absolute | Faceit-style Elo rating in place of per-kill scoring |
+| [Ranks_CustomCombos](Modules/Ranks_CustomCombos) | additive | Operator-defined kill combinations, with `!combos` |
 
 Modules that publish a read API of their own ship their own contract assembly, from their own
 directory — adding one never touches core.
+
+---
+
+## For plugin developers
+
+Core publishes `Ranks.Api.v1`. Reference `Ranks.Contract.dll` from core's `resources/exports/` —
+**do not copy it next to your plugin**, or the host loads a second one, the interface gets two type
+identities, and binding silently stops matching.
+
+```csharp
+public interface IRanksApi
+{
+    const string InterfaceKey = "Ranks.Api.v1";
+
+    bool IsCoreReady { get; }
+    event Action CoreReady;
+
+    int  GetPoints(ulong steamId);
+    void AddPoints(ulong steamId, int amount, string reason, bool showMessage = true);
+    void SetPoints(ulong steamId, int points, string reason);
+
+    Task<IReadOnlyList<RanksLeaderboardEntry>> GetTopAsync(string statKey = "points", int limit = 10);
+    Task<int> GetPositionAsync(ulong steamId, string statKey = "points");
+
+    event Action<RanksPointsChangingArgs> PointsChanging;   // set Cancel, or amend Amount
+    event Action<RanksPointsChangedArgs>  PointsChanged;
+    event Action<RanksRankChangedArgs>    RankChanged;
+
+    string ConnectionName { get; }
+    string ResolveTableName(string baseName);
+    void   RegisterMigrations(Assembly assembly, string pluginId);
+
+    void SetKillArbiter(IRanksKillArbiter? arbiter);
+}
+```
+
+Three rules matter more than the surface:
+
+- **Inherit `RanksModuleBase`** rather than calling the API raw. It supplies `Table(name)`,
+  `RegisterMigrations(assembly)` and the `OnCoreReady` / `OnPlayerDataLoaded` hooks already wired
+  to the handshake.
+- **Never name a contract type outside one bridge file.** A field or constant of a contract type
+  makes the containing class a JIT hazard on a server with no Ranks installed, and that fails the
+  *whole* host, not just your plugin. Keep the single file that names them behind
+  `[MethodImpl(MethodImplOptions.NoInlining)]` members and type the field `object?`.
+- **Use `ResolveTableName`.** `Database.TablePrefix` and `TableSuffix` exist so several servers can
+  share one database; a hardcoded table name writes to the wrong one.
+
+Core raises every API event on the game thread, so handlers must not block.
 
 ---
 

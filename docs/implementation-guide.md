@@ -67,7 +67,8 @@ mean shipping against an API marked for removal.
 > release notes** — otherwise a bug report cannot be tied to a framework build
 > — and to pin to the first stable 1.5.x once it exists.
 
-> ⚠️ **The `Microsoft.Extensions.*` references must float too — `10.*`.**
+> [!WARNING]
+> **The `Microsoft.Extensions.*` references must float too — `10.*`.**
 > SwiftlyS2 raises its own minimum between betas, and a fixed version here
 > becomes `NU1605: Detected package downgrade` on the next bump: a build
 > failure, not a warning. Observed immediately — `1.5.1-beta.12` requires
@@ -75,7 +76,8 @@ mean shipping against an API marked for removal.
 > with a bare `*`, so a future .NET 11 package cannot be pulled into a
 > `net10.0` plugin.
 
-> ⚠️ **Appendix A was reflected from 1.4.13 and has not been re-run.**
+> [!WARNING]
+> **Appendix A was reflected from 1.4.13 and has not been re-run.**
 > Everything it records is a *lower* bound — later versions are additive over it
 > — but re-run the dump before relying on any member's exact signature, and
 > treat Appendix B's stable-docs-vs-assembly deltas as unverified until then.
