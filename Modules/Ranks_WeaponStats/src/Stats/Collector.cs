@@ -92,8 +92,16 @@ internal sealed class Collector
     {
         // No guards at all: there is no victim to test, so neither the bot switches nor the
         // friendly-fire rule has anything to say about a shot.
-        if (Session(e.UserIdPlayer) is { } stats)
-            stats.For(WeaponNames.Normalize(e.Weapon)).Shots++;
+        if (Session(e.UserIdPlayer) is not { } stats) return HookResult.Continue;
+
+        var counters = stats.For(WeaponNames.Normalize(e.Weapon));
+
+        // This weapon's previous shot never reached OnPlayerHurt, so it damaged nobody. The latch
+        // is per weapon rather than per player so that a grenade, whose damage lands seconds later
+        // and long after the next rifle shot, still resolves against its own trigger pull.
+        counters.ResolvePendingShot();
+        counters.PendingShot = true;
+        counters.Shots++;
 
         return HookResult.Continue;
     }
@@ -105,15 +113,21 @@ internal sealed class Collector
         var attacker = e.AttackerPlayer;
         var victim = e.UserIdPlayer;
 
+        if (Session(attacker) is not { } stats) return HookResult.Continue;
+
+        var counters = stats.For(WeaponNames.Normalize(e.Weapon));
+
+        // Cleared ahead of both guards: a bullet that struck a teammate, or a bot on a server with
+        // CountAgainstBots off, landed. That is a hit which goes uncounted, not a miss — clearing
+        // after the guards would score every such shot as missed.
+        counters.PendingShot = false;
+
         if (IsExcluded(config.Tracking, attacker, victim)) return HookResult.Continue;
         if (!CountAgainst(config.Tracking, victim)) return HookResult.Continue;
-
-        if (Session(attacker) is not { } stats) return HookResult.Continue;
 
         // Actual* throughout: DmgHealth is a short and Hitgroup a byte, so a server granting more
         // than 255 HP silently corrupts the narrow ones.
         var damage = e.ActualDmgHealth;
-        var counters = stats.For(WeaponNames.Normalize(e.Weapon));
 
         counters.Hits++;
         counters.Damage += damage;

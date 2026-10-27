@@ -94,8 +94,8 @@ internal sealed class Writer
 
     private void WriteWeapon(IDbConnection connection, IDbTransaction transaction, ulong steamId, string weapon, WeaponCounters counters)
     {
-        const string Columns = "steam_id, weapon, shots, hits, damage, kills, deaths, headshots";
-        const string Values = "@steam_id, @weapon, @shots, @hits, @damage, @kills, @deaths, @headshots";
+        const string Columns = "steam_id, weapon, shots, hits, misses, damage, kills, deaths, headshots";
+        const string Values = "@steam_id, @weapon, @shots, @hits, @misses, @damage, @kills, @deaths, @headshots";
 
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -107,6 +107,7 @@ internal sealed class Writer
                INSERT INTO {_weaponTable} ({Columns}) VALUES ({Values})
                ON DUPLICATE KEY UPDATE
                    shots = shots + VALUES(shots), hits = hits + VALUES(hits),
+                   misses = misses + VALUES(misses),
                    damage = damage + VALUES(damage), kills = kills + VALUES(kills),
                    deaths = deaths + VALUES(deaths), headshots = headshots + VALUES(headshots)
                """
@@ -116,6 +117,7 @@ internal sealed class Writer
                ON CONFLICT (steam_id, weapon) DO UPDATE SET
                    shots = {_weaponTable}.shots + EXCLUDED.shots,
                    hits = {_weaponTable}.hits + EXCLUDED.hits,
+                   misses = {_weaponTable}.misses + EXCLUDED.misses,
                    damage = {_weaponTable}.damage + EXCLUDED.damage,
                    kills = {_weaponTable}.kills + EXCLUDED.kills,
                    deaths = {_weaponTable}.deaths + EXCLUDED.deaths,
@@ -126,6 +128,7 @@ internal sealed class Writer
         Add(command, "@weapon", weapon);
         Add(command, "@shots", counters.Shots);
         Add(command, "@hits", counters.Hits);
+        Add(command, "@misses", counters.Misses);
         Add(command, "@damage", counters.Damage);
         Add(command, "@kills", counters.Kills);
         Add(command, "@deaths", counters.Deaths);
@@ -241,25 +244,25 @@ internal sealed class Writer
     /// <c>Collector.PeekFor</c>. Unfiltered and unordered, unlike <see cref="Top"/>, which exists
     /// to render a chat table.
     /// </remarks>
-    public Task<List<(string Weapon, long Shots, long Hits, long Damage, long Kills, long Deaths, long Headshots)>> ReadWeaponsAsync(ulong steamId)
+    public Task<List<(string Weapon, long Shots, long Hits, long Misses, long Damage, long Kills, long Deaths, long Headshots)>> ReadWeaponsAsync(ulong steamId)
     {
-        if (!IsReady) return Task.FromResult(new List<(string, long, long, long, long, long, long)>());
+        if (!IsReady) return Task.FromResult(new List<(string, long, long, long, long, long, long, long)>());
 
         return Task.Run(() =>
         {
-            var rows = new List<(string, long, long, long, long, long, long)>();
+            var rows = new List<(string, long, long, long, long, long, long, long)>();
 
             using var connection = _core.Database.GetConnection(_connectionName);
             connection.Open();
 
             using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT weapon, shots, hits, damage, kills, deaths, headshots FROM {_weaponTable} WHERE steam_id = @steam_id";
+            command.CommandText = $"SELECT weapon, shots, hits, misses, damage, kills, deaths, headshots FROM {_weaponTable} WHERE steam_id = @steam_id";
             Add(command, "@steam_id", (long)steamId);
 
             using var reader = command.ExecuteReader();
             while (reader.Read())
                 rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
-                          reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6)));
+                          reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7)));
 
             return rows;
         });
@@ -290,16 +293,16 @@ internal sealed class Writer
     }
 
     /// <summary>Reads a player's weapon rows for the stats command.</summary>
-    public List<(string Weapon, long Shots, long Hits, long Damage, long Kills, long Deaths, long Headshots)> Top(ulong steamId, int limit, int minShots)
+    public List<(string Weapon, long Shots, long Hits, long Misses, long Damage, long Kills, long Deaths, long Headshots)> Top(ulong steamId, int limit, int minShots)
     {
-        var rows = new List<(string, long, long, long, long, long, long)>();
+        var rows = new List<(string, long, long, long, long, long, long, long)>();
 
         using var connection = _core.Database.GetConnection(_connectionName);
         connection.Open();
 
         using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT weapon, shots, hits, damage, kills, deaths, headshots
+            SELECT weapon, shots, hits, misses, damage, kills, deaths, headshots
               FROM {_weaponTable}
              WHERE steam_id = @steam_id AND shots >= @min_shots
              ORDER BY kills DESC, shots DESC
@@ -313,7 +316,7 @@ internal sealed class Writer
         using var reader = command.ExecuteReader();
         while (reader.Read())
             rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
-                      reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6)));
+                      reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7)));
 
         return rows;
     }

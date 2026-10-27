@@ -109,7 +109,7 @@ internal sealed class StatsCommands
         });
     }
 
-    private void Reply(ulong steamId, List<(string Weapon, long Shots, long Hits, long Damage, long Kills, long Deaths, long Headshots)> rows)
+    private void Reply(ulong steamId, List<(string Weapon, long Shots, long Hits, long Misses, long Damage, long Kills, long Deaths, long Headshots)> rows)
     {
         var player = _core.PlayerManager.GetPlayerFromSteamId(steamId, allowUnauthorized: false);
         if (player is null) return;

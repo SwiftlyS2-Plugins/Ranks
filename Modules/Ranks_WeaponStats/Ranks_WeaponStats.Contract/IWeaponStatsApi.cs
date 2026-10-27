@@ -5,11 +5,17 @@ namespace Ranks.WeaponStats.Contract;
 /// <paramref name="Weapon"/> is the entity designer name — <c>weapon_ak47</c>, not <c>ak47</c>.
 /// Death sources that are not weapons keep their bare name (<c>world</c>, <c>planted_c4</c>), and
 /// a value the module could not use at all becomes <c>unknown</c>.
+///
+/// <paramref name="Misses"/> counts trigger pulls that damaged nobody, which is <em>not</em>
+/// <c>Shots - Hits</c>: one shotgun blast is a single shot that can land nine hits, so that
+/// subtraction goes negative. Weapons that cannot deal damage at all — smokes, flashes, decoys —
+/// therefore report every shot as a miss.
 /// </remarks>
 public sealed record WeaponStatRow(
     string Weapon,
     long Shots,
     long Hits,
+    long Misses,
     long Damage,
     long Kills,
     long Deaths,

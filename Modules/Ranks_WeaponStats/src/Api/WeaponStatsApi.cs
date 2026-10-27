@@ -33,17 +33,18 @@ internal sealed class WeaponStatsApi : IWeaponStatsApi
 
         var merged = new Dictionary<string, WeaponStatRow>(StringComparer.Ordinal);
 
-        foreach (var (weapon, shots, hits, damage, kills, deaths, headshots) in stored)
-            merged[weapon] = new WeaponStatRow(weapon, shots, hits, damage, kills, deaths, headshots);
+        foreach (var (weapon, shots, hits, misses, damage, kills, deaths, headshots) in stored)
+            merged[weapon] = new WeaponStatRow(weapon, shots, hits, misses, damage, kills, deaths, headshots);
 
         foreach (var (weapon, counters) in live?.Weapons ?? [])
         {
-            var row = merged.GetValueOrDefault(weapon) ?? new WeaponStatRow(weapon, 0, 0, 0, 0, 0, 0);
+            var row = merged.GetValueOrDefault(weapon) ?? new WeaponStatRow(weapon, 0, 0, 0, 0, 0, 0, 0);
 
             merged[weapon] = row with
             {
                 Shots = row.Shots + counters.Shots,
                 Hits = row.Hits + counters.Hits,
+                Misses = row.Misses + counters.Misses,
                 Damage = row.Damage + counters.Damage,
                 Kills = row.Kills + counters.Kills,
                 Deaths = row.Deaths + counters.Deaths,

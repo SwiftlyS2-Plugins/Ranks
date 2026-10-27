@@ -5,12 +5,30 @@ internal sealed class WeaponCounters
 {
     public long Shots;
     public long Hits;
+    public long Misses;
     public long Damage;
     public long Kills;
     public long Deaths;
     public long Headshots;
 
-    public bool IsEmpty => (Shots | Hits | Damage | Kills | Deaths | Headshots) == 0;
+    /// <summary>A fired shot that has not yet been seen to damage anyone.</summary>
+    /// <remarks>
+    /// Latch state, not a counter, so it is deliberately absent from <see cref="IsEmpty"/> and
+    /// from the detached copy. It can only ever be true alongside a non-zero <see cref="Shots"/>
+    /// within the same flush window, so a pending shot can never be skipped as empty.
+    /// </remarks>
+    public bool PendingShot;
+
+    public bool IsEmpty => (Shots | Hits | Misses | Damage | Kills | Deaths | Headshots) == 0;
+
+    /// <summary>Banks an unresolved shot as a miss.</summary>
+    public void ResolvePendingShot()
+    {
+        if (!PendingShot) return;
+
+        PendingShot = false;
+        Misses++;
+    }
 }
 
 /// <summary>One player's unflushed deltas. Game thread only.</summary>
@@ -68,12 +86,18 @@ internal sealed class SessionStats
 
         foreach (var (weapon, counters) in Weapons)
         {
+            // A flush is many ticks after the shot, so a still-unresolved latch can only be a
+            // miss. Peek must not do this: banking the miss on a read would bank it again on the
+            // next fire.
+            if (reset) counters.ResolvePendingShot();
+
             if (counters.IsEmpty) continue;
 
             weapons.Add((weapon, new WeaponCounters
             {
                 Shots = counters.Shots,
                 Hits = counters.Hits,
+                Misses = counters.Misses,
                 Damage = counters.Damage,
                 Kills = counters.Kills,
                 Deaths = counters.Deaths,
@@ -84,6 +108,7 @@ internal sealed class SessionStats
 
             counters.Shots = 0;
             counters.Hits = 0;
+            counters.Misses = 0;
             counters.Damage = 0;
             counters.Kills = 0;
             counters.Deaths = 0;
