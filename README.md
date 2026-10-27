@@ -22,12 +22,12 @@ ship alongside core, and writing your own touches nothing in core.
 
 ## ✨ Features
 
-- 🏆 **Points and ranks** - a configurable ladder, priced per event, with VIP and dynamic multipliers
+- 🏆 **Points and ranks** - a configurable rank ladder, priced per event, with VIP and dynamic multipliers
 - 📊 **Gameplay stats** - kills, deaths, assists, round and match results, bomb plants and defuses
 - 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, Danger Zone, or a Custom mode for replacement icon sets, plus rank clan tags
 - 🗄️ **MySQL, MariaDB, PostgreSQL or SQLite** - one connection, shared with every module
 - 🧩 **Module API** - other plugins read ranks, react to changes, and own tables core migrates for them
-- 🔁 **Live config reload** - points, ladder and scoreboard changes apply on save; only command names and table affixes need a restart
+- 🔁 **Live config reload** - points, rank ladder and scoreboard changes apply on save; only command names and table affixes need a restart
 - 🏷️ **Multi-server friendly** - table prefixes and suffixes let several servers share one database
 
 ## 🚀 Getting Started
@@ -38,14 +38,14 @@ ship alongside core, and writing your own touches nothing in core.
 | **[Commands](../../wiki/Commands)** | Player and admin commands |
 | **[Configuration](../../wiki/Configuration)** | Every setting, with defaults |
 
-## 🏆 Tuning The Ladder
+## 🏆 Tuning Rank Progression
 
 | Topic | Description |
 |-------|-------------|
 | **[Points and Events](../../wiki/Points-And-Events)** | Price every action, and the gates that suppress them |
 | **[Rank Ladder](../../wiki/Rank-Ladder)** | Turn points into named tiers |
 | **[Scoreboard and Rank Icons](../../wiki/Scoreboard-And-Rank-Icons)** | Five modes, plus your own icon set |
-| **[Database](../../wiki/Database)** | Shared ladders, seasons, purging, persistence |
+| **[Database](../../wiki/Database)** | Shared rank ladders, seasons, purging, persistence |
 
 ## 🧩 Modules
 
@@ -58,7 +58,7 @@ ship alongside core, and writing your own touches nothing in core.
 
 Only the two scoring kinds can conflict. An **additive** module adds points alongside core's
 scoring. An **absolute** module replaces it entirely — set `Rank.UseCoreRankingLogic` to `false`
-and the module becomes the only thing writing points, while core keeps persistence, the ladder,
+and the module becomes the only thing writing points, while core keeps persistence, the rank ladder,
 the scoreboard and the commands.
 
 > [!WARNING]
