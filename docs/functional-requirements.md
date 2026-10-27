@@ -1779,19 +1779,20 @@ overlaid with nothing left running to explain it.
 A module consuming the API must treat it as a **soft dependency**:
 
 - Bind in **both** `UseSharedInterface` and `OnSharedInterfaceInjected`, and
-  bind fail-closed (`_api = im.HasSharedInterface(k) ? im.Get…(k) : null;`),
-  never early-return — an early return leaves a stale reference pointing at a
-  disposed provider.
+  bind fail-closed with `TryGetSharedInterface` — it nulls its `out` parameter
+  on a miss, so a single assignment covers both outcomes. Never early-return: an
+  early return leaves a stale reference pointing at a disposed provider.
 - Report absence from `OnAllPluginsLoaded`, not from the binder. The binder runs
   on every rebuild and would spam; `OnAllPluginsLoaded` runs once per load cycle
   and is the only point where field state is authoritative.
 - Because the contract DLL may genuinely be absent, the acquisition path must be
-  split so that no method the JIT compiles can reference the contract type
-  before `HasSharedInterface` has confirmed it is present. The JIT resolves type
-  references at method-preparation time, so an in-body `try`/`catch` around the
-  acquisition does **not** catch the resulting `FileNotFoundException` — it
-  escapes to the caller frame and fails plugin hosting outright. Mirror the API
-  field into a plain `bool` for every other method to read.
+  split so that no method the JIT compiles can reference the contract type until
+  a method the caller can guard is entered. The JIT resolves type references at
+  method-preparation time, so an in-body `try`/`catch` around the acquisition
+  does **not** catch the resulting `FileNotFoundException` — it escapes to the
+  caller frame, and the shared-interface callbacks are unguarded by core, so it
+  fails plugin hosting outright. The `try`/`catch` belongs at the call site.
+  Mirror the API field into a plain `bool` for every other method to read.
 
 This is consumer guidance, but it belongs in the contract's documentation
 because every module author will hit it.

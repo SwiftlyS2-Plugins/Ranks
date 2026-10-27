@@ -6,7 +6,7 @@ applyTo: 'CHANGELOG.md'
 # Changelog style
 
 The changelog **is** the release body. `.github/workflows/release.yml` pulls the
-section whose heading matches `PluginMetadata.Version` in `Ranks/src/Ranks.cs` and
+section whose heading matches `PluginMetadata.Version` in `Ranks/src/Entrypoint.cs` and
 publishes it verbatim, so write for the person reading the GitHub release page.
 
 ## Audience

@@ -7,7 +7,7 @@
 
 This file governs **this repository only**: the `Ranks` core plugin, the
 `Ranks.Contract` assembly, and the official module plugins that consume it
-(WeaponStats, PointsHistory, WeaponStatsHistory).
+(WeaponStats, EloPoints, CustomCombos, Prestige).
 
 The functional specification lives in [`docs/functional-requirements.md`](../docs/functional-requirements.md).
 **That document is the authority on *what* to build; this one covers *how* to
@@ -1055,45 +1055,73 @@ execution reaches the line. On a server without the provider:
   typed `IRanksApi?`** — throws `FileNotFoundException` when its enclosing
   method is prepared;
 - the throw surfaces at the **caller's** frame, so the method's own try/catch
-  never sees it;
-- SwiftlyS2 reports `Hosting failed to start` and **every plugin on the box
-  fails to load**, not just yours.
+  never sees it.
+
+**Which callback it escapes from decides the blast radius**, and only one of the
+two is survivable (verified in `PluginManager.cs`):
+
+| Escapes from | Guarded by core? | Result |
+|---|---|---|
+| `Load` | `LoadPluginInternal` wraps it in `try`/`catch` → `CleanupFailedPlugin` + `FailWithError` | **Your plugin only** is marked `Error` |
+| `ConfigureSharedInterface`, `UseSharedInterface`, `OnSharedInterfaceInjected` | **No.** `RebuildSharedServices` runs all three loops bare | Propagates through `LoadPlugins` → `Initialize` → `StartupService`'s constructor → `Hosting failed to start`, **every plugin on the box** |
+| `OnAllPluginsLoaded` | **No.** `NotifyAllPluginsLoaded` is bare | Same as above |
+
+Acquisition happens in `UseSharedInterface` / `OnSharedInterfaceInjected`, i.e.
+in the unguarded half. That is why the `try`/`catch` has to be there and cannot
+be deferred to `Load`.
 
 `Try…` / `Has…` look defensive and are not. Isolate instead — nothing outside
-the `[NoInlining]` method may name the contract type:
+the `[NoInlining]` method may name the contract type, and the `try` goes in the
+**caller**, which is the frame the throw actually lands in:
 
 ```csharp
-private void Acquire(IInterfaceManager im)
+private void Acquire(IInterfaceManager im)   // names no contract type
 {
-    bool registered;
-    try { registered = im.HasSharedInterface("Ranks.Api.v1"); }   // probe inside the try
-    catch (Exception ex) { _available = false; logger.LogWarning("{Message}", ex.Message); return; }
-
-    if (!registered) { _ranksApi = null; _available = false; return; }
-
-    try { AcquireInner(im); }
-    catch (Exception ex) when (ex is FileNotFoundException or TypeLoadException or BadImageFormatException)
-    { _ranksApi = null; _available = false; logger.LogWarning("Ranks contract not resolvable ({Message})", ex.Message); }
+    try { _bridge.TryAcquire(im); }
+    catch (Exception ex) { logger.LogDebug(ex, "contract not resolvable"); }
 }
 
 [MethodImpl(MethodImplOptions.NoInlining)]
-private void AcquireInner(IInterfaceManager im)
+public bool TryAcquire(IInterfaceManager im)
 {
-    im.TryGetSharedInterface<IRanksApi>("Ranks.Api.v1", out var api);
-    _ranksApi = api;
-    _available = api is not null;
+    try
+    {
+        if (!im.TryGetSharedInterface<IRanksApi>("Ranks.Api.v1", out var api) || api is null)
+        {
+            _api = null; _available = false;
+            return false;
+        }
+
+        _api = api; _available = true;
+        Attach(api);
+        return true;
+    }
+    catch (Exception ex)   // runtime faults inside Attach — never the JIT throw
+    {
+        logger.LogWarning(ex, "could not acquire the Ranks API");
+        _api = null; _available = false;
+        return false;
+    }
 }
 ```
+
+`TryGetSharedInterface` subsumes the `Has…` probe: one call, no window between
+check and fetch, `out` null on a miss, one place to fail closed. The caller's
+catch is **unfiltered** on purpose — filtering to
+`FileNotFoundException or TypeLoadException or BadImageFormatException` lets
+anything unforeseen through, and this path's whole job is to never fail the host.
 
 Every other method reads `_available` (a `bool` needs no contract resolution)
 and routes typed calls through its own `[NoInlining]` helper.
 
 **`Unload` is the classic miss.** `_api.PointsChanged -= handler` needs the
 contract loaded to unwire, and its in-body try/catch cannot catch its own
-JIT-time throw — give it the same isolated-helper treatment. When auditing, grep
-the **field name** across the whole plugin: the acquire path is the obvious site
-and never the only one. A stray `if (_ranksApi != null)` in a summary log line
-crashes exactly as hard.
+JIT-time throw — give it the same isolated-helper treatment. Core catches it
+there, so the cost is a failed unload and a plugin left `Indeterminate` rather
+than a dead host. When auditing, grep the **field name** across the whole
+plugin: the acquire path is the obvious site and never the only one. A stray
+`if (_ranksApi != null)` in a summary log line throws just as readily, and the
+table above says what it costs depending on where it runs.
 
 ### Referencing the contract
 
@@ -1559,6 +1587,25 @@ whatever has accumulated since the last pass.
 
 ## 14. Auditing & Bug Prevention
 
+### Load-time self-checks
+
+Core and the modules run assertion-based self-checks from the entrypoint on every
+load. They cover the rules that produce a *plausibly wrong* result rather than a
+visibly broken one — a scoreboard that renders the wrong icon set looks like a
+design choice, so it has to fail at load instead.
+
+| Check | Covers |
+|-------|--------|
+| `TableNamesSelfCheck` | Prefix and suffix resolution |
+| `ScoringSelfCheck` | The warmup / bot death-gate truth table |
+| `ScoreboardSelfCheck` | Engine rank-type mapping, the custom icon formula, overlay fallback |
+| `PrestigeSelfCheck` | Level resolution and the deduction |
+
+They **throw rather than log**: a wrong engine rank type is silent in every other
+way, and an operator cannot be expected to notice it. A new invariant of that
+shape — silent when broken, cheap to assert — belongs here rather than in a test
+project.
+
 ### How to run an audit
 
 Every item below is an **enumeration, not an affirmation**. "All `Core.Event +=`
@@ -1741,7 +1788,9 @@ public override void UseSharedInterface(IInterfaceManager im)
 // BUG: binder early-returns and keeps a stale reference
 if (!im.HasSharedInterface("Ranks.Api.v1")) return;             // _api kept
 _api = im.GetSharedInterface<IRanksApi>("Ranks.Api.v1");
-// FIX: fail closed, and report absence from OnAllPluginsLoaded.
+// FIX: TryGetSharedInterface nulls the out param on a miss, so one assignment fails closed
+_ = im.TryGetSharedInterface<IRanksApi>("Ranks.Api.v1", out var api);
+_api = api;                                                     // absence -> OnAllPluginsLoaded
 
 // BUG: disconnect handler gated on IsValid — the pawn is already gone
 if (!player.IsValid) return;                                    // save never runs
@@ -1814,7 +1863,7 @@ dotnet publish Ranks/Ranks.csproj -c Release
 
 `Ranks.csproj` emits `build/publish/Ranks/` and zips it to
 `build/Ranks-v<version>.zip` via the `CreateZip` target, which reads
-`PluginMetadata.Version` out of `Ranks/src/Ranks.cs` with the `ExtractPluginVersion`
+`PluginMetadata.Version` out of `Ranks/src/Entrypoint.cs` with the `ExtractPluginVersion`
 inline task. The version lives in exactly one place; nothing else needs stamping.
 
 ### Cutting a release
@@ -1872,39 +1921,45 @@ otherwise you cannot tell the fix from a warm-cache effect.
 Ranks/
 ├── .github/
 │   ├── copilot-instructions.md          ← this file
+│   ├── readme-instructions.md           ← README style
 │   ├── instructions/
 │   │   └── changelog.instructions.md    ← CHANGELOG.md style
 │   └── workflows/
 │       └── release.yml                  ← build + GitHub release
 ├── docs/
-│   └── functional-requirements.md       ← the specification
+│   ├── functional-requirements.md       ← the specification
+│   ├── implementation-guide.md          ← architecture
+│   └── verify-wiki.ps1                  ← wiki checks (gitignored)
 ├── Ranks/                               ← core plugin
 │   ├── Ranks.csproj
 │   ├── src/
-│   │   ├── Ranks.cs                     ← plugin class, Load/Unload
-│   │   ├── Config/                      ← config models
+│   │   ├── Entrypoint.cs                ← plugin class, Load/Unload
 │   │   ├── Api/                         ← IRanksApi implementation
-│   │   ├── Events/                      ← core event catalogue + registry
-│   │   ├── Points/                      ← scoring engine, gates, multipliers
-│   │   ├── Ranks/                       ← ladder + scoreboard integration
-│   │   ├── Database/                    ← schema, migrations, writer
 │   │   ├── Commands/
+│   │   ├── Config/                      ← config models + defaults
+│   │   ├── Database/                    ← schema, migrations, store
+│   │   ├── Logging/
 │   │   ├── Menus/
-│   │   └── Players/                     ← record cache, load/save lifecycle
+│   │   ├── Players/                     ← record cache, load/save lifecycle
+│   │   ├── Ranking/                     ← ladder resolution
+│   │   ├── Scoreboard/                  ← rank icon, clan tag, overlay
+│   │   └── Scoring/                     ← award pipeline, gates, multipliers
 │   └── resources/
+│       ├── examples/ranks-competitive.jsonc
 │       ├── translations/en.jsonc        ← REQUIRED
 │       └── exports/                     ← Ranks.Contract.dll (build-generated)
 ├── Ranks.Contract/                      ← public API assembly
-│   └── IRanksApi.cs, DTOs, enums
-├── Ranks_WeaponStats/                   ← official module
-├── Ranks_PointsHistory/                 ← official module
-├── Ranks_WeaponStatsHistory/            ← official module
-├── Ranks.slnx
+│   └── IRanksApi.cs, RanksTypes.cs, RanksKillTypes.cs, RanksModuleBase.cs
+├── Modules/
+│   ├── Ranks_WeaponStats/               ← data, publishes its own contract
+│   ├── Ranks_EloPoints/                 ← absolute, publishes its own contract
+│   ├── Ranks_CustomCombos/              ← additive, publishes its own contract
+│   └── Ranks_Prestige/                  ← display, no contract
 ├── CHANGELOG.md
 ├── LICENSE
 └── README.md
 ```
 
-> The module project layout assumes the single-repo answer to **Q1** in the
-> requirements doc. If that lands as repo-per-module instead, only the three
-> `Ranks.*` module folders move — `Ranks/` and `Ranks.Contract/` stay.
+Each module is its own project with its own `src/Api/RanksBridge.cs`, config
+models, `CHANGELOG.md` and `README.md`. The consumer-facing wiki lives in the
+separate `Ranks.wiki` repository.

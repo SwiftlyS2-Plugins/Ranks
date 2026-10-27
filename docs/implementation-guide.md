@@ -1428,16 +1428,27 @@ execution reaches the line. On a server without `Ranks`:
   `IRanksApi?`** — throws `FileNotFoundException` when its enclosing method is
   prepared;
 - the throw surfaces at the **caller's** frame, so the method's own try/catch
-  never sees it;
-- SwiftlyS2 reports `Hosting failed to start` and **every plugin on the box
-  fails to load**.
+  never sees it.
+
+**Which callback it escapes from decides the blast radius** (verified in
+`PluginManager.cs`): core wraps `Load` and `Unload` per plugin, so a throw there
+fails only this plugin. It does **not** wrap `ConfigureSharedInterface`,
+`UseSharedInterface`, `OnSharedInterfaceInjected` or `OnAllPluginsLoaded` —
+`RebuildSharedServices` and `NotifyAllPluginsLoaded` run those loops bare, and an
+escape propagates to `StartupService`'s constructor as
+`Hosting failed to start`, taking **every plugin on the box** with it.
+Acquisition happens in exactly those unguarded callbacks.
 
 `Try…` / `Has…` look defensive and are not. Isolate: nothing outside a
 `[MethodImpl(MethodImplOptions.NoInlining)]` helper may name the contract type,
-and every other method reads a plain `bool`.
+every other method reads a plain `bool`, and the `try`/`catch` goes at the **call
+site** — inside the helper it is JITted too late to fire.
 
 `Unload` is the classic miss — `_api.PointsChanged -= handler` needs the contract
-loaded to unwire. When auditing, grep the **field name** across the whole plugin.
+loaded to unwire. Core catches it there, so the cost is a failed unload and a
+plugin left `Indeterminate` rather than a dead host, but it still needs the same
+isolated-helper treatment. When auditing, grep the **field name** across the
+whole plugin.
 
 ### 10.3 Gate on readiness
 
