@@ -77,6 +77,7 @@ internal sealed class ScoringHandlers
         if (attacker is not null && !selfInflicted && !friendlyFire)
         {
             attacker.Kills++;
+            if (e.Headshot) attacker.Headshots++;
             attacker.Dirty = true;
         }
 
@@ -89,6 +90,50 @@ internal sealed class ScoringHandlers
         AwardVictim(victim, attacker, e.AttackerPlayer, selfInflicted);
         AwardAttacker(e, attacker, victim, selfInflicted, friendlyFire);
         AwardAssister(e, assister, attacker, victim);
+
+        return HookResult.Continue;
+    }
+
+    /// <remarks>
+    /// The previous shot never reached OnPlayerHurt, so it damaged nobody. Misses cannot be derived
+    /// as shots minus hits: one shotgun blast is a single trigger pull that lands up to nine hits,
+    /// so that subtraction goes negative.
+    /// </remarks>
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnWeaponFire(EventWeaponFire e)
+    {
+        if (Record(e.UserIdPlayer) is not { } record) return HookResult.Continue;
+
+        if (record.PendingShot)
+        {
+            record.PendingShot = false;
+
+            if (_awards.ShouldRecordShot())
+            {
+                record.Misses++;
+                record.Dirty = true;
+            }
+        }
+
+        record.PendingShot = true;
+
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnPlayerHurt(EventPlayerHurt e)
+    {
+        if (Record(e.AttackerPlayer) is not { } attacker) return HookResult.Continue;
+
+        // Cleared ahead of the gates: a bullet that struck a teammate, or a bot on a server not
+        // counting them, still landed. Clearing after would score every such shot as a miss.
+        attacker.PendingShot = false;
+
+        if (e.AttackerPlayer?.Slot == e.UserIdPlayer?.Slot) return HookResult.Continue;
+        if (!_awards.ShouldRecordDeath(IsBot(e.UserIdPlayer), IsBot(e.AttackerPlayer))) return HookResult.Continue;
+
+        attacker.Hits++;
+        attacker.Dirty = true;
 
         return HookResult.Continue;
     }

@@ -6,11 +6,9 @@ namespace Ranks.WeaponStats.Migrations;
 /// <remarks>
 /// A third table rather than columns on <c>ranks_weapon_stats</c>: the hitgroup axis is 12 wide
 /// with a permanent hole at 9, so folding it in would mean a dozen sparse columns per weapon.
-/// Summing this table over weapons reproduces <c>ranks_hit_stats</c> exactly, miss bucket included.
+/// Summing this table over weapons reproduces <c>ranks_hit_stats</c> exactly.
 ///
-/// <c>ranks_hit_stats</c> needs no change for the miss bucket: its <c>hitgroup</c> column is
-/// already signed, and misses ride it as <c>-1</c>, which <c>HitGroup_t</c> can never produce.
-/// Core runs this migration, not the module.
+/// Only landed hits appear — a miss has no hitgroup. Core runs this migration, not the module.
 /// </remarks>
 [Migration(202610291200)]
 public sealed class M202610291200_WeaponHitGroups : Migration

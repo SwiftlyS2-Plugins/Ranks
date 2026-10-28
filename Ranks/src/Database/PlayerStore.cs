@@ -18,6 +18,9 @@ internal static class StatColumns
         ["core.kills"] = "kills",
         ["core.deaths"] = "deaths",
         ["core.assists"] = "assists",
+        ["core.headshots"] = "headshots",
+        ["core.hits"] = "hits",
+        ["core.misses"] = "misses",
         ["core.round_wins"] = "round_wins",
         ["core.round_losses"] = "round_losses",
         ["core.match_wins"] = "match_wins",
@@ -39,6 +42,9 @@ internal static class StatColumns
         "core.kills" => record.Kills,
         "core.deaths" => record.Deaths,
         "core.assists" => record.Assists,
+        "core.headshots" => record.Headshots,
+        "core.hits" => record.Hits,
+        "core.misses" => record.Misses,
         "core.round_wins" => record.RoundWins,
         "core.round_losses" => record.RoundLosses,
         "core.match_wins" => record.MatchWins,
@@ -83,7 +89,7 @@ internal sealed class PlayerStore
             SELECT p.steam_id, p.name, p.points, p.kills, p.deaths, p.assists,
                    p.round_wins, p.round_losses, p.match_wins, p.match_losses,
                    p.bombs_planted, p.bombs_defused, p.first_seen, p.last_seen,
-                   s.show_point_messages
+                   s.show_point_messages, p.headshots, p.hits, p.misses
               FROM {PlayersTable} p
               LEFT JOIN {SettingsTable} s ON s.steam_id = p.steam_id
              WHERE p.steam_id = @steam_id
@@ -110,6 +116,9 @@ internal sealed class PlayerStore
             FirstSeen = reader.GetDateTime(12),
             LastSeen = reader.GetDateTime(13),
             ShowPointMessages = reader.IsDBNull(14) || Convert.ToBoolean(reader.GetValue(14)),
+            Headshots = reader.GetInt32(15),
+            Hits = reader.GetInt32(16),
+            Misses = reader.GetInt32(17),
         };
     }
 
@@ -275,9 +284,11 @@ internal sealed class PlayerStore
     private void WritePlayer(IDbConnection connection, IDbTransaction transaction, PlayerSnapshotRow row)
     {
         const string Columns = "steam_id, name, points, kills, deaths, assists, round_wins, round_losses, " +
-                               "match_wins, match_losses, bombs_planted, bombs_defused, first_seen, last_seen";
+                               "match_wins, match_losses, bombs_planted, bombs_defused, first_seen, last_seen, " +
+                               "headshots, hits, misses";
         const string Values = "@steam_id, @name, @points, @kills, @deaths, @assists, @round_wins, @round_losses, " +
-                              "@match_wins, @match_losses, @bombs_planted, @bombs_defused, @first_seen, @last_seen";
+                              "@match_wins, @match_losses, @bombs_planted, @bombs_defused, @first_seen, @last_seen, " +
+                              "@headshots, @hits, @misses";
 
         // first_seen is deliberately absent from both update lists: it is set once, and an absolute
         // writer that restated it would move it forward on every save.
@@ -285,6 +296,7 @@ internal sealed class PlayerStore
                                    "assists = @assists, round_wins = @round_wins, round_losses = @round_losses, " +
                                    "match_wins = @match_wins, match_losses = @match_losses, " +
                                    "bombs_planted = @bombs_planted, bombs_defused = @bombs_defused, " +
+                                   "headshots = @headshots, hits = @hits, misses = @misses, " +
                                    "last_seen = @last_seen";
 
         using var command = connection.CreateCommand();
@@ -307,6 +319,9 @@ internal sealed class PlayerStore
         AddParameter(command, "@bombs_defused", row.BombsDefused);
         AddParameter(command, "@first_seen", row.FirstSeen);
         AddParameter(command, "@last_seen", row.LastSeen);
+        AddParameter(command, "@headshots", row.Headshots);
+        AddParameter(command, "@hits", row.Hits);
+        AddParameter(command, "@misses", row.Misses);
 
         command.ExecuteNonQuery();
     }
@@ -374,11 +389,14 @@ internal readonly record struct PlayerSnapshotRow(
     int BombsDefused,
     DateTime FirstSeen,
     DateTime LastSeen,
-    bool ShowPointMessages)
+    bool ShowPointMessages,
+    int Headshots,
+    int Hits,
+    int Misses)
 {
     public static PlayerSnapshotRow From(PlayerRecord record) => new(
         record.SteamId, record.Name, record.Points, record.Kills, record.Deaths, record.Assists,
         record.RoundWins, record.RoundLosses, record.MatchWins, record.MatchLosses,
         record.BombsPlanted, record.BombsDefused, record.FirstSeen, record.LastSeen,
-        record.ShowPointMessages);
+        record.ShowPointMessages, record.Headshots, record.Hits, record.Misses);
 }

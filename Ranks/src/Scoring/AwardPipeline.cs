@@ -86,6 +86,13 @@ internal sealed class AwardPipeline
         return true;
     }
 
+    /// <summary>Whether a fired shot counts toward the player's accuracy.</summary>
+    /// <remarks>
+    /// Warmup only. A miss names no victim, so the bot gate has nothing to test — and the shooter
+    /// is necessarily human, because a bot has no record to count against in the first place.
+    /// </remarks>
+    public bool ShouldRecordShot() => _config.Current.Rank.WarmupPoints || !IsWarmup();
+
     /// <summary>Awards a configured event to a player, applying gates and multipliers.</summary>
     /// <remarks>
     /// Returns silently when core's scoring is off: with core not awarding, its gates and

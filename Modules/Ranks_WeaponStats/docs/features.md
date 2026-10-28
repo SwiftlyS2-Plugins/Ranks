@@ -232,12 +232,11 @@ module's ledger (FR-DB-05).
 `ON DUPLICATE KEY UPDATE` silently inserts duplicates forever while PostgreSQL and
 SQLite reject the statement outright.
 
-**Misses ride the hitgroup axis as `-1`.** A miss has no hitgroup, so it cannot be a
-column on a table keyed by one, and `HitGroup_t` has no negative members for it to
-collide with — which also meant the existing signed `hitgroup` column needed no
-migration. Summing `ranks_weapon_hit_stats` over weapons reproduces `ranks_hit_stats`
-exactly, miss bucket included, because both are written from the same per-weapon
-counters in one flush.
+**Only landed hits appear here.** A miss has no hitgroup, so it cannot be a row on
+a table keyed by one — misses are counted per weapon on `ranks_weapon_stats.misses`
+and overall on core's `ranks_players.misses`. Summing `ranks_weapon_hit_stats` over
+weapons reproduces `ranks_hit_stats` exactly, because both are written from the same
+per-weapon counters in one flush.
 
 Weapon is stored as a name rather than a defindex: the events give a name, and
 resolving it to a defindex would add a lookup that earns nothing.

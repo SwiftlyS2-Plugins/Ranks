@@ -8,7 +8,6 @@ Per-weapon and per-hitbox statistics for the [Ranks](../../README.md) plugin.
 
 - 🔫 **Per-weapon totals** - shots, hits, damage, kills, deaths and headshots for every gun
 - 🎯 **Hitbox breakdown** - where your bullets actually land, by hitgroup and per weapon
-- ✖️ **Misses counted as a bucket** - the distribution covers every trigger pull, not just the ones that landed
 - 📊 **In-game command** - `!weaponstats`, configurable name and permission
 - 🤖 **Bot and friendly-fire switches** - count them or not, per game mode
 - 🔌 **Published API** - other plugins read the same totals
@@ -141,7 +140,12 @@ totals reconcile:
 
 ```
 SUM(ranks_weapon_stats.kills) per player  ==  ranks_players.kills
+SUM(ranks_weapon_stats.hits)  per player  ==  ranks_players.hits
 ```
+
+Core keeps its own overall `hits`, `misses` and `headshots` on the player row, counted
+from the same events but gated by **core's** settings. The two agree only while the
+switches here match core's, exactly as for kills.
 
 Setting either switch independently of core's breaks that, and `!weaponstats` will
 disagree with `!stats`. That is an operator choice rather than a bug — but worth
@@ -217,9 +221,8 @@ public interface IWeaponStatsApi
 `GetWeaponHitGroupsAsync` is the same distribution split by weapon — summing its rows
 over weapons reproduces `GetHitGroupsAsync` exactly.
 
-**Misses are a hitgroup bucket**, `WeaponHitGroups.Miss` (`-1`), present in both. A miss
-has no hitgroup, so it cannot be a column on a table keyed by one; `HitGroup_t` has no
-negative members, so the value cannot collide. `Damage` on a miss row is always `0`.
+**Only landed hits appear in either.** A miss has no hitgroup; misses are on the weapon
+row (`Misses`) and, overall, on core's `ranks_players.misses`.
 
 `Weapon` is the entity designer name (`weapon_ak47`, not `ak47`); `GetWeaponAsync`
 normalises either spelling. `HitGroup` is the raw `HitGroup_t` value, which is not a

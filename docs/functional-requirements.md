@@ -194,6 +194,9 @@ keeping it that way is what makes FR-DB-06's single-statement upsert portable.
 | `kills` | `INT` | **Enemy kills only.** A team kill is its own event (`team_kill`) and does not increment this. Counting it would make `!top kills` farmable by killing teammates. |
 | `deaths` | `INT` | **Every death**, whatever killed the player — enemy, teammate, world or their own hand. A death is not farmable, and excluding any source would make the figure disagree with the scoreboard. |
 | `assists` | `INT` | |
+| `headshots` | `INT` | Enemy kills that were headshots, so it is a subset of `kills` and gated identically. |
+| `hits` | `INT` | Shots that damaged someone. **Not** shots: one shotgun blast lands up to nine. |
+| `misses` | `INT` | Trigger pulls that damaged nobody. **Never `shots - hits`** — that goes negative on a shotgun. Resolved by a per-player latch, so a grenade whose damage lands after the next shot is attributed to that shot. |
 | `round_wins` | `INT` | |
 | `round_losses` | `INT` | |
 | `match_wins` | `INT` | |
@@ -1214,11 +1217,10 @@ Per-weapon and per-hitbox tracking.
 - Tables: `ranks_weapon_stats`, `ranks_hit_stats`, `ranks_weapon_hit_stats`, all
   affixed via FR-API-06 so they sit alongside the core tables, and all migrated by
   core against the module's own ledger (FR-DB-05).
-- **Misses are a hitgroup bucket**, `WeaponHitGroups.Miss` (`-1`), stored in both
-  hitgroup tables. A miss has no hitgroup, so it cannot be a column on a table keyed
-  by one; `HitGroup_t` has no negative members, so the value cannot collide and the
-  existing signed `hitgroup` column needed no migration. `ranks_weapon_hit_stats`
-  summed over weapons reproduces `ranks_hit_stats` exactly, miss bucket included.
+- **Only landed hits appear in the hitgroup tables.** A miss has no hitgroup, so it
+  cannot be a row on a table keyed by one; misses are counted per weapon on
+  `ranks_weapon_stats.misses` and overall on `ranks_players.misses`.
+  `ranks_weapon_hit_stats` summed over weapons reproduces `ranks_hit_stats` exactly.
 - Commands: `!weaponstats` / `!ws`, `!hitstats` / `!hs`, owned by the module —
   core's menu does not list them (FR-CMD-04).
   > **Gap:** `!hitstats` is **not implemented**. The hitgroup counters are

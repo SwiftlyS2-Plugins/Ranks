@@ -23,6 +23,15 @@ internal sealed class PlayerRecord
 
     public int Assists { get; set; }
 
+    /// <summary>Enemy kills that were headshots.</summary>
+    public int Headshots { get; set; }
+
+    /// <summary>Shots that damaged someone. One blast can land several, so this is not shots.</summary>
+    public int Hits { get; set; }
+
+    /// <summary>Trigger pulls that damaged nobody. Never <c>shots - hits</c>; see <see cref="PendingShot"/>.</summary>
+    public int Misses { get; set; }
+
     public int RoundWins { get; set; }
 
     public int RoundLosses { get; set; }
@@ -56,6 +65,14 @@ internal sealed class PlayerRecord
 
     /// <summary>Buffered point lines awaiting the round-end summary.</summary>
     public int PendingSummaryPoints { get; set; }
+
+    /// <summary>A fired shot not yet seen to damage anyone; never persisted.</summary>
+    /// <remarks>
+    /// Resolved into <see cref="Misses"/> by the next shot. Player-scoped rather than per weapon,
+    /// so a grenade whose damage lands after the next rifle shot is attributed to that shot —
+    /// Ranks_WeaponStats latches per weapon because it reports per weapon, and this does not.
+    /// </remarks>
+    public bool PendingShot { get; set; }
 
     public bool Dirty { get; set; }
 }

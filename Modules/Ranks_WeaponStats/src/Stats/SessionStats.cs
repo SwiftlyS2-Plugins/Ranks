@@ -1,5 +1,3 @@
-using Ranks.WeaponStats.Contract;
-
 namespace Ranks.WeaponStats.Stats;
 
 /// <summary>Per-weapon counters for one session.</summary>
@@ -97,7 +95,6 @@ internal sealed class SessionStats
 
         var rolledHits = new long[WeaponCounters.HitGroupSlots];
         var rolledDamage = new long[WeaponCounters.HitGroupSlots];
-        var rolledMisses = 0L;
 
         foreach (var (weapon, counters) in Weapons)
         {
@@ -135,14 +132,6 @@ internal sealed class SessionStats
                 rolledDamage[slot] += damage;
             }
 
-            // The miss bucket rides the same table as the landed hitgroups, so the distribution
-            // accounts for every trigger pull rather than only the ones that connected.
-            if (counters.Misses > 0)
-            {
-                weaponHitGroups.Add((weapon, WeaponHitGroups.Miss, counters.Misses, 0));
-                rolledMisses += counters.Misses;
-            }
-
             weapons.Add((weapon, copy));
 
             if (!reset) continue;
@@ -167,8 +156,6 @@ internal sealed class SessionStats
 
             hitGroups.Add((slot, rolledHits[slot], rolledDamage[slot]));
         }
-
-        if (rolledMisses > 0) hitGroups.Add((WeaponHitGroups.Miss, rolledMisses, 0));
 
         return weapons.Count == 0 ? null : new StatsDelta(SteamId, weapons, hitGroups, weaponHitGroups);
     }
