@@ -33,6 +33,7 @@ public sealed class RanksWeaponStats : BasePlugin
     private CancellationTokenSource? _flushTimer;
     private bool _reconciled;
     private bool _hotReload;
+    private bool _contractLoadFailed;
 
     public RanksWeaponStats(ISwiftlyCore core) : base(core)
     {
@@ -88,6 +89,7 @@ public sealed class RanksWeaponStats : BasePlugin
         }
         catch (Exception ex)
         {
+            _contractLoadFailed = true;
             _logger.LogDebug(ex, "Ranks_WeaponStats: the Ranks contract could not be loaded.");
         }
     }
@@ -109,6 +111,18 @@ public sealed class RanksWeaponStats : BasePlugin
     public override void OnAllPluginsLoaded()
     {
         if (_bridge.IsAvailable) return;
+
+        // Two different faults with one symptom: core absent, or present but its contract
+        // unloadable from here. Saying "not present" for the second sends the operator looking
+        // for a plugin that is sitting right there.
+        if (_contractLoadFailed)
+        {
+            _logger.LogWarning(
+                "Ranks_WeaponStats: Ranks.Contract could not be loaded, so this module is idle. " +
+                "Check that Ranks ships resources/exports/Ranks.Contract.dll and that this module does not.");
+
+            return;
+        }
 
         _logger.LogWarning(
             "Ranks_WeaponStats: the Ranks plugin is not present, so this module is idle. " +

@@ -27,6 +27,7 @@ public sealed class RanksEloPoints : BasePlugin
     private MatchTracker _tracker = null!;
     private RanksBridge _bridge = null!;
     private EloPointsApi _api = null!;
+    private bool _contractLoadFailed;
 
     private CancellationTokenSource? _endWatchdog;
 
@@ -86,6 +87,7 @@ public sealed class RanksEloPoints : BasePlugin
         }
         catch (Exception ex)
         {
+            _contractLoadFailed = true;
             _logger.LogDebug(ex, "Ranks_EloPoints: the Ranks contract could not be loaded.");
         }
     }
@@ -105,6 +107,18 @@ public sealed class RanksEloPoints : BasePlugin
     public override void OnAllPluginsLoaded()
     {
         if (_bridge.IsAvailable) return;
+
+        // Two different faults with one symptom: core absent, or present but its contract
+        // unloadable from here. Saying "not present" for the second sends the operator looking
+        // for a plugin that is sitting right there.
+        if (_contractLoadFailed)
+        {
+            _logger.LogWarning(
+                "Ranks_EloPoints: Ranks.Contract could not be loaded, so this module is idle. " +
+                "Check that Ranks ships resources/exports/Ranks.Contract.dll and that this module does not.");
+
+            return;
+        }
 
         _logger.LogWarning(
             "Ranks_EloPoints: the Ranks plugin is not present, so this module is idle. " +

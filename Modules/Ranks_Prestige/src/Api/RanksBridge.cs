@@ -77,10 +77,22 @@ internal sealed class RanksBridge
     {
         try
         {
+            // HasSharedInterface matches on the key string; TryGetSharedInterface resolves by Type.
+            // The two disagreeing is the one symptom of a second Ranks.Contract.dll — core publishes
+            // under its IRanksApi and this module asks for a different one — and the typed call alone
+            // reports it as a bare false, indistinguishable from core not being installed.
+            var published = interfaceManager.HasSharedInterface(IRanksApi.InterfaceKey);
+
             // Fail-closed on the miss: leaving a stale reference behind would point at a disposed
             // provider after the next handshake rebuild.
             if (!interfaceManager.TryGetSharedInterface<IRanksApi>(IRanksApi.InterfaceKey, out var api) || api is null)
             {
+                if (published)
+                    _logger.LogWarning(
+                        "Ranks_Prestige: '{Key}' is published but did not resolve to this module's IRanksApi. " +
+                        "Ranks.Contract.dll is loaded twice — it must ship only in Ranks/resources/exports.",
+                        IRanksApi.InterfaceKey);
+
                 _api = null;
                 IsAvailable = false;
 

@@ -31,6 +31,7 @@ public sealed class RanksCustomCombos : BasePlugin
     private RoundWatcher _rounds = null!;
     private RanksBridge _bridge = null!;
     private CustomCombosApi _api = null!;
+    private bool _contractLoadFailed;
 
     private CancellationTokenSource? _flushTimer;
 
@@ -91,6 +92,7 @@ public sealed class RanksCustomCombos : BasePlugin
         }
         catch (Exception ex)
         {
+            _contractLoadFailed = true;
             _logger.LogDebug(ex, "Ranks_CustomCombos: the Ranks contract could not be loaded.");
         }
     }
@@ -117,6 +119,18 @@ public sealed class RanksCustomCombos : BasePlugin
                 _logger.LogWarning(
                     "Ranks_CustomCombos: no combos are configured, so nothing will be awarded. " +
                     "See resources/examples/combos.jsonc.");
+
+            return;
+        }
+
+        // Two different faults with one symptom: core absent, or present but its contract
+        // unloadable from here. Saying "not present" for the second sends the operator looking
+        // for a plugin that is sitting right there.
+        if (_contractLoadFailed)
+        {
+            _logger.LogWarning(
+                "Ranks_CustomCombos: Ranks.Contract could not be loaded, so this module is idle. " +
+                "Check that Ranks ships resources/exports/Ranks.Contract.dll and that this module does not.");
 
             return;
         }

@@ -24,6 +24,7 @@ public sealed class RanksPrestige : BasePlugin
     private CommandsConfig _commandsConfig = null!;
     private PrestigeCommands _commands = null!;
     private RanksBridge _bridge = null!;
+    private bool _contractLoadFailed;
 
     public RanksPrestige(ISwiftlyCore core) : base(core)
     {
@@ -84,7 +85,20 @@ public sealed class RanksPrestige : BasePlugin
         }
         catch (Exception ex)
         {
+            _contractLoadFailed = true;
             _logger.LogDebug(ex, "Ranks_Prestige: the Ranks contract could not be loaded.");
+        }
+
+        // Two different faults with one symptom: core absent, or present but its contract
+        // unloadable from here. Saying "not present" for the second sends the operator looking
+        // for a plugin that is sitting right there.
+        if (_contractLoadFailed)
+        {
+            _logger.LogWarning(
+                "Ranks_Prestige: Ranks.Contract could not be loaded, so this module is idle. " +
+                "Check that Ranks ships resources/exports/Ranks.Contract.dll and that this module does not.");
+
+            return;
         }
 
         _logger.LogWarning(
