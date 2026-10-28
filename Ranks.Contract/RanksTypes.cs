@@ -127,6 +127,5 @@ public static class RanksDisplayModes
     public const string Premier = "Premier";
     public const string Competitive = "Competitive";
     public const string Wingman = "Wingman";
-    public const string DangerZone = "DangerZone";
     public const string Custom = "Custom";
 }

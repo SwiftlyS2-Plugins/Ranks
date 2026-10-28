@@ -25,7 +25,7 @@ left untouched.
   back to the bottom tier instead of keeping a top-tier icon beside a reset number.
 - `TagPrefix` adds a prestige marker to core's clan tag, composed by core — the module never
   writes the tag itself and so never flickers against it.
-- A level can switch the scoreboard mode (`Premier`, `Competitive`, `Wingman`, `DangerZone`,
+- A level can switch the scoreboard mode (`Premier`, `Competitive`, `Wingman`,
   `Custom`), so later prestiges can look different from earlier ones.
 - The display updates on every points change rather than on a timer.
 - `!prestige` (alias `!myprestige`) reports the current level and the points to the next.

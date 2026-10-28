@@ -24,7 +24,7 @@ ship alongside core, and writing your own touches nothing in core.
 
 - 🏆 **Points and ranks** - a configurable rank ladder, priced per event, with VIP and dynamic multipliers
 - 📊 **Gameplay stats** - kills, deaths, assists, round and match results, bomb plants and defuses
-- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, Danger Zone, or a Custom mode for replacement icon sets, plus rank clan tags
+- 🎖️ **Native scoreboard ranks** - Premier, Competitive, Wingman, or a Custom mode for replacement icon sets, plus rank clan tags
 - 🗄️ **MySQL, MariaDB, PostgreSQL or SQLite** - one connection, shared with every module
 - 🧩 **Module API** - other plugins read ranks, react to changes, and own tables core migrates for them
 - 🔁 **Live config reload** - points, rank ladder and scoreboard changes apply on save; only command names and table affixes need a restart

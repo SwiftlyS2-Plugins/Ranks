@@ -108,7 +108,7 @@ internal static class LadderSeed
             // Re-tuning demotes players who have not lost a single point, so it is a deliberate decision
             // rather than routine maintenance.
             //
-            // SkillGroup is read by the per-tier icon modes - Competitive, Wingman and Danger Zone.
+            // SkillGroup is read by the per-tier icon modes - Competitive and Wingman.
             // Premier (the default) renders the point total itself and colours it by CS2's own band,
             // which is what makes seven coarse bands legible - the colour is the tier, the number is
             // the progress bar. Switching to Competitive without also switching to a finer-grained

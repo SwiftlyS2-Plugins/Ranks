@@ -8,7 +8,7 @@ Prestige levels for the [Ranks](../../README.md) plugin, as a virtual point dedu
 
 - ♻️ **Virtual deduction** - the scoreboard restarts at zero each prestige; stored points keep climbing
 - 🏷️ **Prestige tag** - a prefix on core's clan tag, composed by core rather than fought over
-- 🎖️ **Per-level scoreboard mode** - a level can switch between Premier, Competitive, Wingman, Danger Zone or Custom
+- 🎖️ **Per-level scoreboard mode** - a level can switch between Premier, Competitive, Wingman or Custom
 - ⚡ **Follows every points change** - the display moves with the award, not on a timer
 - 🗄️ **No database, no migration** - the level is derived from points the player already has
 
@@ -59,7 +59,7 @@ Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
 | `Levels` | array | 5 levels | The prestige steps |
 | `Levels[].Level` | int | — | The number shown to the player. Must be above zero |
 | `Levels[].MinimumPoints` | int | — | Stored points this level opens at, **and** the amount deducted |
-| `Levels[].RankMode` | string | `""` | `Premier`, `Competitive`, `Wingman`, `DangerZone` or `Custom`. Empty keeps core's mode |
+| `Levels[].RankMode` | string | `""` | `Premier`, `Competitive`, `Wingman` or `Custom`. Empty keeps core's mode |
 | `DetailedLogging` | bool | `false` | Narrates expected flow; warnings and errors print regardless |
 
 ### Example Configuration
@@ -111,8 +111,7 @@ Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
       { "Level": 1, "MinimumPoints": 40000,  "RankMode": "" },
       { "Level": 2, "MinimumPoints": 80000,  "RankMode": "Competitive" },
       { "Level": 3, "MinimumPoints": 120000, "RankMode": "Wingman" },
-      { "Level": 4, "MinimumPoints": 160000, "RankMode": "DangerZone" },
-      { "Level": 5, "MinimumPoints": 200000, "RankMode": "Custom" }
+      { "Level": 4, "MinimumPoints": 160000, "RankMode": "Custom" }
     ]
   }
 }

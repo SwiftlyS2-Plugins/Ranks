@@ -107,6 +107,38 @@
     <Copy SourceFiles="$(_ContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
   </Target>
 
+  <ItemGroup>
+    <!-- Shipped from resources/exports, not just beside Ranks.dll. Each plugin gets its own load
+         context, and SwiftlyS2 shares exactly one thing between them: it loads every
+         resources/exports/*.dll into the default context and hands those types to every plugin
+         loader with PreferSharedTypes. A module's Migration subclasses need these two types, so
+         without this they either fail to load outright or resolve a private copy -
+         ScanIn().For.Migrations() then compares against a different IMigration and finds nothing.
+         Abstractions carries IMigration/MigrationAttribute, FluentMigrator.dll the Migration base;
+         sharing one without the other still splits the identity. The Runner.* assemblies stay
+         private - no module names them. -->
+    <SharedExportAssembly Include="FluentMigrator.dll" />
+    <SharedExportAssembly Include="FluentMigrator.Abstractions.dll" />
+  </ItemGroup>
+
+  <Target Name="CopySharedExports" AfterTargets="Build">
+    <ItemGroup>
+      <_SharedExportBuild Include="@(SharedExportAssembly->'$(OutDir)%(Identity)')" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(_SharedExportBuild.FullPath)')"
+           Text="CopySharedExports: %(_SharedExportBuild.FullPath) is missing." />
+    <Copy SourceFiles="@(_SharedExportBuild)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopySharedExportsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <_SharedExportPublish Include="@(SharedExportAssembly->'$(PublishDir)%(Identity)')" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(_SharedExportPublish.FullPath)')"
+           Text="CopySharedExportsToPublish: %(_SharedExportPublish.FullPath) is missing." />
+    <Copy SourceFiles="@(_SharedExportPublish)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="CreateZip" AfterTargets="Publish">
     <ExtractPluginVersion FilePath="$(MSBuildThisFileDirectory)src\Entrypoint.cs">
       <Output TaskParameter="PluginVersion" PropertyName="_PluginVersion" />

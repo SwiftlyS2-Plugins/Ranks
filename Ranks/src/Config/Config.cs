@@ -87,7 +87,9 @@ public enum RankDisplayMode
     Premier = 1,
     Competitive = 2,
     Wingman = 3,
-    DangerZone = 4,
+
+    // 4 was DangerZone, whose icons stock CS2 does not ship. The gap stays: Mode also parses the
+    // numeric form, so renumbering Custom would silently re-point a config that carries one.
 
     /// <remarks>
     /// Competitive's icon slots driven by ladder position through <c>Scoreboard.CustomRank*</c>,
@@ -109,7 +111,7 @@ public sealed class ScoreboardOptions
     /// accepts the numeric form a file already carrying <c>1</c> keeps working.
     /// </para>
     /// </remarks>
-    [Description("Off, Premier, Competitive, Wingman, DangerZone or Custom.")]
+    [Description("Off, Premier, Competitive, Wingman or Custom.")]
     public string RankMode { get; set; } = nameof(RankDisplayMode.Premier);
 
     /// <summary>The parsed <see cref="RankMode"/>, falling back to Premier.</summary>
@@ -126,7 +128,7 @@ public sealed class ScoreboardOptions
 
     public bool Clantags { get; set; } = false;
 
-    /// <remarks>Read by the icon modes (Competitive, Wingman, DangerZone); Premier and Custom ignore it.</remarks>
+    /// <remarks>Read by the icon modes (Competitive, Wingman); Premier and Custom ignore it.</remarks>
     public int SkillGroupOffset { get; set; } = 0;
 
     /// <remarks>First icon index of a replacement set. Custom mode only.</remarks>

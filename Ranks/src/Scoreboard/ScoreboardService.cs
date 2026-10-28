@@ -198,7 +198,6 @@ internal sealed class ScoreboardService : IDisposable
             RankDisplayMode.Premier => displayPoints,
             RankDisplayMode.Competitive => CompetitiveIcon(config, skillGroup, MaxSkillGroup),
             RankDisplayMode.Wingman => CompetitiveIcon(config, skillGroup, MaxSkillGroup),
-            RankDisplayMode.DangerZone => CompetitiveIcon(config, skillGroup, MaxDangerZoneIcon),
             RankDisplayMode.Custom => CustomIcon(config.Scoreboard, index + 1),
             _ => displayPoints,
         };
@@ -207,7 +206,7 @@ internal sealed class ScoreboardService : IDisposable
 
         // CS2 folds the wins count into the icon derivation, so leaving it at whatever the engine
         // last held collapses every player onto the same displayed rank.
-        var wins = record.MatchWins;
+        var wins = 10;
 
         // All three fields are networked, and a module refreshing per points change makes this run
         // every kill. Valve's scoreboard delta detection means the notifier IS the replication
@@ -232,14 +231,17 @@ internal sealed class ScoreboardService : IDisposable
     /// <remarks>
     /// An unparseable name is ignored rather than treated as Off: a module typo should not silently
     /// blank every scoreboard, and the string crosses an assembly boundary where no enum can.
+    /// IsDefined is part of that: TryParse also accepts numbers, so without it a stale "4" would
+    /// resolve to the removed DangerZone member and EngineRankType would map it to 0 — no rank.
     /// </remarks>
     internal static RankDisplayMode ResolveMode(RanksConfig config, RanksDisplayOverride? overlay) =>
-        overlay?.RankMode is { Length: > 0 } name && Enum.TryParse<RankDisplayMode>(name, ignoreCase: true, out var mode)
+        overlay?.RankMode is { Length: > 0 } name
+        && Enum.TryParse<RankDisplayMode>(name, ignoreCase: true, out var mode)
+        && Enum.IsDefined(mode)
             ? mode
             : config.Scoreboard.Mode;
 
     private const int MaxSkillGroup = 18;
-    private const int MaxDangerZoneIcon = 15;
 
     /// <summary>Translates the plugin-level mode to the engine's <c>m_iCompetitiveRankType</c>.</summary>
     /// <remarks>
@@ -252,7 +254,6 @@ internal sealed class ScoreboardService : IDisposable
         RankDisplayMode.Premier => 11,
         RankDisplayMode.Competitive => 12,
         RankDisplayMode.Wingman => 7,
-        RankDisplayMode.DangerZone => 10,
         RankDisplayMode.Custom => 12,
         _ => 0,
     };

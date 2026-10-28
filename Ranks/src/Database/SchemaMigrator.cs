@@ -1,5 +1,6 @@
 using System.Data;
 using System.Reflection;
+using FluentMigrator;
 using FluentMigrator.Runner;
 using FluentMigrator.Runner.Processors;
 using Microsoft.Extensions.DependencyInjection;
@@ -82,6 +83,8 @@ internal sealed class SchemaMigrator
 
     private void Run(Assembly assembly, string ledger, string pluginId)
     {
+        WarnOnSplitMigratorIdentity(assembly, pluginId);
+
         var before = ListTables();
 
         var services = new ServiceCollection()
@@ -112,6 +115,34 @@ internal sealed class SchemaMigrator
         }
 
         VerifyAffixes(before, pluginId);
+    }
+
+    /// <remarks>
+    /// ScanIn().For.Migrations() matches on core's IMigration, so a module that resolved its own
+    /// FluentMigrator contributes zero migrations and MigrateUp() reports success over a schema it
+    /// never created. Attributes are compared by name because the whole failure is that the two
+    /// Types are not equal. Fix is packaging, not code: the module must reference FluentMigrator
+    /// with ExcludeAssets="runtime" and take core's exported copy.
+    /// </remarks>
+    private void WarnOnSplitMigratorIdentity(Assembly assembly, string pluginId)
+    {
+        Type[] types;
+
+        try { types = assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { types = [.. ex.Types.OfType<Type>()]; }
+
+        if (types.Any(t => typeof(IMigration).IsAssignableFrom(t) && t is { IsClass: true, IsAbstract: false })) return;
+
+        var declared = types.Count(t => t.GetCustomAttributesData()
+            .Any(a => a.AttributeType.FullName == "FluentMigrator.MigrationAttribute"));
+
+        if (declared == 0) return;
+
+        _logger.LogError(
+            "Ranks: module {PluginId} declares {Count} migration(s) that core cannot see. Its " +
+            "FluentMigrator is a second copy, so no table will be created. Ship the module with " +
+            "FluentMigrator ExcludeAssets=\"runtime\" and let it bind to Ranks/resources/exports.",
+            pluginId, declared);
     }
 
     /// <remarks>

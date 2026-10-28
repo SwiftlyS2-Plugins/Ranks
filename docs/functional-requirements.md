@@ -1032,7 +1032,6 @@ by `ScoreboardService.EngineRankType`. The engine's set is not `0`–`4`:
 | `Premier` *(default)* | `11` | The player's points, rendered as a CS Rating | — |
 | `Competitive` | `12` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 18 |
 | `Wingman` | `7` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 18 |
-| `DangerZone` | `10` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 15 |
 | `Custom` | `12` | Ladder **position** through `Scoreboard.CustomRank*` | `CustomRankMax` |
 
 > [!WARNING]
@@ -1066,7 +1065,7 @@ itself, so there is nothing to map. **`Custom` ignores them too**, deriving its 
 ladder position instead. Ladder entries still carry a `SkillGroup` in every mode so that
 switching `RankMode` works without re-authoring the file.
 
-In the per-tier icon modes (Competitive, Wingman, Danger Zone):
+In the per-tier icon modes (Competitive and Wingman):
 
 - Each ladder entry carries a `SkillGroup` index, so an 18-rank ladder need not
   map 1:1 onto the 18 CS2 skill groups — several ranks may share an icon.
@@ -1074,8 +1073,7 @@ In the per-tier icon modes (Competitive, Wingman, Danger Zone):
   exists for servers shipping a replacement skill-group image set whose icons
   start at a different base index.
 - The resolved index is clamped to the engine's valid range after the offset is
-  applied — 18 for Competitive and Wingman, **15 for Danger Zone**, which has
-  fewer icons.
+  applied — 18 for Competitive and Wingman.
 - **Every networked field write must be followed by its `*Updated()` notifier** —
   `CompetitiveRankingUpdated()` and `CompetitiveRankTypeUpdated()` here,
   `ScoreUpdated()` for FR-SCB-02, `ClanUpdated()` for FR-SCB-01. Without it the
@@ -2206,7 +2204,7 @@ Neither is a design question; both fail **silently** if wrong.
 7. **Premier mode (the default) renders the player's points as a CS Rating on
    the scoreboard**, coloured by CS2's own band, and the number moves within a
    round. Competitive mode renders the configured skill-group index shifted by
-   the offset; Premier, Wingman and Danger Zone ignore both `SkillGroup` and the
+   the offset; Premier and Wingman ignore both `SkillGroup` and the
    offset. Every rank-type value is confirmed against a live server, not assumed
    — see the warning in FR-SCB-03.
 8. A fresh player starts at `0` in the Grey band, and crossing `5000` promotes

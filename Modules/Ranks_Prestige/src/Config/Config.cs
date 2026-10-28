@@ -16,7 +16,7 @@ public sealed class PrestigeLevel
     [Description("Stored points at which this level opens, and the amount deducted from the display.")]
     public int MinimumPoints { get; set; }
 
-    [Description("Scoreboard mode for this level: Premier, Competitive, Wingman, DangerZone, Custom. Empty keeps core's configured mode.")]
+    [Description("Scoreboard mode for this level: Premier, Competitive, Wingman, Custom. Empty keeps core's configured mode.")]
     public string RankMode { get; set; } = string.Empty;
 }
 

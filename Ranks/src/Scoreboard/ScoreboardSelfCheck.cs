@@ -29,7 +29,6 @@ internal static class ScoreboardSelfCheck
             (RankDisplayMode.Premier, 11),
             (RankDisplayMode.Competitive, 12),
             (RankDisplayMode.Wingman, 7),
-            (RankDisplayMode.DangerZone, 10),
             (RankDisplayMode.Custom, 12),
         ];
 
@@ -97,16 +96,31 @@ internal static class ScoreboardSelfCheck
         Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride(RankMode: "Wingman")) == RankDisplayMode.Wingman,
             "an overlay must be able to change the mode");
 
-        Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride(RankMode: "dangerzone")) == RankDisplayMode.DangerZone,
+        Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride(RankMode: "competitive")) == RankDisplayMode.Competitive,
             "mode names must parse case-insensitively");
 
         Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride(RankMode: "Premiere")) == RankDisplayMode.Premier,
             "an unparseable mode must fall back, not blank the scoreboard");
 
+        // 4 was DangerZone. TryParse accepts the number, so without an IsDefined guard a config or
+        // overlay left over from that mode resolves to a member that no longer exists and
+        // EngineRankType sends 0 - the engine's "no rank".
+        config.Scoreboard.RankMode = "4";
+        Require(ScoreboardService.ResolveMode(config, null) == RankDisplayMode.Premier,
+            "a configured mode naming the removed DangerZone must fall back to Premier");
+
+        config.Scoreboard.RankMode = nameof(RankDisplayMode.Premier);
+
+        Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride(RankMode: "4")) == RankDisplayMode.Premier,
+            "an overlay naming the removed DangerZone must fall back, not blank the scoreboard");
+
+        Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride(RankMode: "DangerZone")) == RankDisplayMode.Premier,
+            "the removed mode's name must fall back too");
+
         foreach (var name in new[]
         {
             RanksDisplayModes.Off, RanksDisplayModes.Premier, RanksDisplayModes.Competitive,
-            RanksDisplayModes.Wingman, RanksDisplayModes.DangerZone, RanksDisplayModes.Custom,
+            RanksDisplayModes.Wingman, RanksDisplayModes.Custom,
         })
         {
             Require(Enum.TryParse<RankDisplayMode>(name, out _),
