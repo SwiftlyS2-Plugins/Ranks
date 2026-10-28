@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using System.Reflection;
 using FluentMigrator;
 using FluentMigrator.Runner;
@@ -92,7 +93,7 @@ internal sealed class SchemaMigrator
             .ConfigureRunner(rb =>
             {
                 ConfigureEngine(rb);
-                rb.WithGlobalConnectionString(_core.Database.GetConnectionString(_database.Name))
+                rb.WithGlobalConnectionString(MigratorConnectionString())
                   .WithVersionTable(new AffixedVersionTable(ledger))
                   .ScanIn(assembly).For.Migrations();
             })
@@ -143,6 +144,32 @@ internal sealed class SchemaMigrator
             "FluentMigrator is a second copy, so no table will be created. Ship the module with " +
             "FluentMigrator ExcludeAssets=\"runtime\" and let it bind to Ranks/resources/exports.",
             pluginId, declared);
+    }
+
+    /// <summary>The named connection's string, with SwiftlyS2's MySQL timeout key corrected.</summary>
+    /// <remarks>
+    /// <c>DatabaseConnectionInfo.ToString()</c> writes Npgsql's <c>Timeout=</c> for mysql too, and
+    /// MySqlConnector throws "Option 'timeout' not supported" on it. SwiftlyS2's own factory sets
+    /// <c>ConnectionTimeout</c> instead, so only code handed the raw string breaks, and only when an
+    /// operator configures a non-zero timeout. Postgres is correct as-is. Parsed rather than
+    /// string-replaced: a password may contain ';' or '=' and arrives quoted.
+    /// </remarks>
+    private string MigratorConnectionString()
+    {
+        var raw = _core.Database.GetConnectionString(_database.Name);
+        var driver = _database.Info.Driver?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (driver is not ("mysql" or "mariadb")) return raw;
+
+        var builder = new DbConnectionStringBuilder { ConnectionString = raw };
+
+        if (!builder.TryGetValue("timeout", out var timeout)) return raw;
+
+        builder.Remove("timeout");
+
+        if (!builder.ContainsKey("connectiontimeout")) builder["ConnectionTimeout"] = timeout;
+
+        return builder.ConnectionString;
     }
 
     /// <remarks>
