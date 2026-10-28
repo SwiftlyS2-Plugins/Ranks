@@ -37,10 +37,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The self-check harness is a throwaway console app that links three of this module's
-         source files; compiling its Program.cs into the plugin would be an error waiting on a
-         glob change. The contract sits inside this directory for the same reason. -->
-    <Compile Remove=".selfcheck/**/*.cs" />
+    <!-- The contract lives inside this project's directory, so the default glob would compile its
+         sources into the plugin on top of referencing the assembly. -->
     <Compile Remove="Ranks_EloPoints.Contract/**/*.cs" />
   </ItemGroup>
 

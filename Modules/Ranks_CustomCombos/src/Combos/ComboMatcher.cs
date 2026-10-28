@@ -5,8 +5,8 @@ namespace Ranks.CustomCombos.Combos;
 
 /// <summary>Parses the configured combos and picks which one pays for a kill.</summary>
 /// <remarks>
-/// Pure with respect to the game: it takes <see cref="KillFacts"/> and a counter callback, which
-/// is what lets the self-check drive it without a server.
+/// Pure with respect to the game: it takes <see cref="KillFacts"/> and a counter callback rather
+/// than reaching for live state.
 /// </remarks>
 internal sealed class ComboMatcher
 {

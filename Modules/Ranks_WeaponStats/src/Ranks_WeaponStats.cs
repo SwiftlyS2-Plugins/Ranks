@@ -44,7 +44,6 @@ public sealed class RanksWeaponStats : BasePlugin
         _hotReload = hotReload;
         _logger = Core.LoggerFactory.CreateLogger("Ranks_WeaponStats");
 
-        WeaponNamesSelfCheck.Run();
         LoadConfiguration();
 
         _writer = new Writer(Core, _logger);

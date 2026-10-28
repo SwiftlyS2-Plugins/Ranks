@@ -76,7 +76,7 @@ internal sealed class AwardPipeline
             config.Rank.WarmupPoints, IsWarmup(), config.Rank.PointsForBots, victimIsBot, attackerIsBot);
     }
 
-    /// <remarks>Split from the live state so <c>ScoringSelfCheck</c> can assert the truth table.</remarks>
+    /// <remarks>Split from the live state so the warmup / bot truth table reads as one expression.</remarks>
     internal static bool ShouldRecordDeath(
         bool warmupPoints, bool isWarmup, bool pointsForBots, bool victimIsBot, bool attackerIsBot)
     {

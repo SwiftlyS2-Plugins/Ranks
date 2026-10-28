@@ -14,7 +14,7 @@ internal sealed class RankLadder
 
     /// <remarks>
     /// Takes a supplier rather than the config host so it re-reads on every access (the file is
-    /// hot-reloaded) without naming the host, which also lets the self-check drive it directly.
+    /// hot-reloaded) without naming the host.
     /// </remarks>
     public RankLadder(Func<IReadOnlyList<RankTier>> tiers) => _tiers = tiers;
 

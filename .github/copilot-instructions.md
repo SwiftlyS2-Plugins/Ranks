@@ -1587,24 +1587,38 @@ whatever has accumulated since the last pass.
 
 ## 14. Auditing & Bug Prevention
 
-### Load-time self-checks
+### Silent invariants
 
-Core and the modules run assertion-based self-checks from the entrypoint on every
-load. They cover the rules that produce a *plausibly wrong* result rather than a
-visibly broken one — a scoreboard that renders the wrong icon set looks like a
-design choice, so it has to fail at load instead.
+These rules used to be asserted by load-time self-checks. The checks are gone —
+they were pure, so they could only ever report what the author's own first run
+already showed, while a wrong assertion would stop the plugin loading on every
+server at once. The rules themselves did not go away, and **none of them fails
+visibly**: breaking one produces a plausible-looking result, not an error. Verify
+them by reading when you touch the logic, and state in your report which ones the
+change could have affected.
 
-| Check | Covers |
-|-------|--------|
-| `TableNamesSelfCheck` | Prefix and suffix resolution |
-| `ScoringSelfCheck` | The warmup / bot death-gate truth table |
-| `ScoreboardSelfCheck` | Engine rank-type mapping, the custom icon formula, overlay fallback |
-| `PrestigeSelfCheck` | Level resolution and the deduction |
+| Area | Invariant | Why it is silent |
+|---|---|---|
+| `TableNames` | The plugin supplies the separator, not the operator. Empty affixes change nothing. A module ledger drops the `ranks` prefix. Overlong identifiers fold deterministically | A wrong affix writes to a real table that is simply the wrong one, and a ledger collision reports migrations as applied that never ran |
+| `AwardPipeline.ShouldRecordDeath` | The warmup / bot gate is a five-input truth table: warmup deaths drop when `WarmupPoints` is off, bot deaths when `PointsForBots` is off | Scoring just runs slightly wrong, forever |
+| Scoring anchors | Equal players score the configured value; the difference is bounded and symmetric; the ladder picks the highest threshold met | A broken anchor makes every configured `kill` value mean something other than what it says |
+| `ScoreboardService.EngineRankType` | Every visible mode maps to a **confirmed** engine rank type. `0` is the engine's "no rank" | CS2 renders nothing for an unrecognised `m_iCompetitiveRankType` and reports no error, so it looks like the feature is switched off. It shipped broken once, writing `(byte)mode` |
+| `ScoreboardService.ResolveMode` | An unparseable or undefined mode falls back to the configured mode, never to `Off`. `Enum.TryParse` accepts numbers, so `Enum.IsDefined` is required | A module typo would otherwise blank every scoreboard on the server |
+| `CustomIcon` | At the shipped defaults, ladder position 1 lands on icon 0 and saturates past 18; a margin larger than the position must clamp at 0 | The engine treats the value as an array index |
+| `EloMath` | `Expected(r,r) == 0.5` and `Expected(a,b) + Expected(b,a) == 1`; zero evidence moves nothing; shrinkage is monotonic in `n`; the envelope clamp holds on a **corrupted** accrual; the sign floor cannot turn a win into a loss; the penalty is a flat deduction; ties share a percentile rank | A sign error is invisible on even teams, a missing clamp only shows on a lopsided match, and a wrong shrinkage weight just moves the ladder at the wrong speed. The clamp is unreachable on valid data — a 20 000-iteration random sweep passed with it deleted |
+| `PrestigeLadder` | Thresholds resolve to the highest level reached; crossing one resets the display to zero; operator order and duplicates do not change the outcome | A wrong level silently shows the wrong number to the player |
+| `ComboMatcher` | Closest match wins, ties go to config order, `RequiresNone` excludes, a count combo needs the whole run and keeps accumulating after a loss, weapon class accepts both spellings | A combo that never fires looks like the operator configured it wrong |
+| Weapon names | Both event spellings land on one row; non-weapon sources keep their bare name; unusable values become `unknown` | Stats split silently across two rows for the same gun |
 
-They **throw rather than log**: a wrong engine rank type is silent in every other
-way, and an operator cannot be expected to notice it. A new invariant of that
-shape — silent when broken, cheap to assert — belongs here rather than in a test
-project.
+### Where checking belongs instead
+
+- **Operator input is a different category and still gets validated at runtime.**
+  `ConfigValidator` stays: numbers clamp and warn, but table affixes **throw**
+  against `^[A-Za-z0-9_]*$` because an identifier cannot be parameterised and is
+  concatenated into DDL. That is a SQL-injection boundary, not a self-check.
+- Do **not** reintroduce assertion classes, `.selfcheck` harness projects, or a
+  test project. If a rule above is genuinely load-bearing and cheap, document it
+  here and keep the code shaped so it reads correctly.
 
 ### How to run an audit
 

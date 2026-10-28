@@ -186,7 +186,7 @@ internal sealed class CustomCombosModule : RanksModuleBase
 /// <summary>Answers core's per-kill question (FR-API-11).</summary>
 /// <remarks>
 /// Converts core's context into a contract-free <see cref="KillFacts"/> immediately, so the
-/// matcher and its self-check never name a contract type.
+/// matcher never names a contract type.
 /// </remarks>
 internal sealed class ComboArbiter : IRanksKillArbiter
 {

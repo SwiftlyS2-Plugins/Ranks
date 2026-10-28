@@ -12,7 +12,7 @@ public readonly record struct PrestigeStanding(int Level, int DisplayPoints, str
 /// <summary>The ladder, ordered and validated once at load.</summary>
 /// <remarks>
 /// Pure and position-independent: the operator may list levels in any order, and nothing here
-/// touches core, so <see cref="PrestigeSelfCheck"/> can assert the whole mapping without a server.
+/// touches core.
 /// </remarks>
 internal sealed class PrestigeLadder
 {

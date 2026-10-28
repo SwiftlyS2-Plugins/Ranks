@@ -3,8 +3,8 @@ namespace Ranks.CustomCombos.Combos;
 /// <summary>Core's kill facts, restated without naming a <c>Ranks.Contract</c> type.</summary>
 /// <remarks>
 /// The projection exists for the JIT isolation rule: only the bridge file may name contract types,
-/// so everything downstream — the matcher, the self-check — works on this instead and stays
-/// loadable on a server with no Ranks installed.
+/// so everything downstream works on this instead and stays loadable on a server with no Ranks
+/// installed.
 /// </remarks>
 internal readonly record struct KillFacts(
     ulong AttackerSteamId,

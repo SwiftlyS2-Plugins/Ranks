@@ -40,9 +40,6 @@
     <!-- The contract lives inside this project's directory, so the default glob would compile its
          sources into the plugin on top of referencing the assembly. -->
     <Compile Remove="Ranks_CustomCombos.Contract/**/*.cs" />
-    <!-- The self-check harness is a throwaway console app that links this module's source files;
-         compiling its Program.cs into the plugin would be an error waiting on a glob change. -->
-    <Compile Remove=".selfcheck/**/*.cs" />
   </ItemGroup>
 
   <ItemGroup>

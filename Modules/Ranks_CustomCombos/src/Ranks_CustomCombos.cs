@@ -43,7 +43,6 @@ public sealed class RanksCustomCombos : BasePlugin
     {
         _logger = Core.LoggerFactory.CreateLogger("Ranks_CustomCombos");
 
-        ComboSelfCheck.Run();
         LoadConfiguration();
 
         _writer = new Writer(Core, _logger);

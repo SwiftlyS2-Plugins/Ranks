@@ -12,10 +12,6 @@ internal readonly record struct EloInputs(
     double Percentile);
 
 /// <summary>The rating formula. Pure, and names no engine or contract type.</summary>
-/// <remarks>
-/// That isolation is what lets <see cref="EloMathSelfCheck"/> run the whole thing in a console
-/// harness with neither a server nor the Ranks plugin present.
-/// </remarks>
 internal static class EloMath
 {
     /// <summary>Smallest delta a decided result may produce, so a win can never read as a loss.</summary>

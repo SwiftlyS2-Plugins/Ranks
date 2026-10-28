@@ -39,7 +39,6 @@ public sealed class RanksEloPoints : BasePlugin
     {
         _logger = Core.LoggerFactory.CreateLogger("Ranks_EloPoints");
 
-        EloMathSelfCheck.Run();
         LoadConfiguration();
 
         _store = new RatingStore(Core, _logger);

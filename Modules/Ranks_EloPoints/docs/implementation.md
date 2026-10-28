@@ -37,7 +37,6 @@ Modules/Ranks_EloPoints/
     ├── Match/MatchSession.cs        # one player's accrual for one match
     ├── Rating/EloMath.cs            # pure, static, no engine types
     ├── Rating/Performance.cs        # PerfCounters, weights, percentile
-    ├── Rating/EloMathSelfCheck.cs
     └── Rating/RatingStore.cs        # off-thread reads and writes
 ```
 
@@ -45,8 +44,8 @@ Modules/Ranks_EloPoints/
 `[PluginMetadata] Id`. Core derives the migration ledger from that id.
 
 **`EloMath` names no SwiftlyS2 type and no contract type.** Everything it needs
-arrives as `double`, `int` and arrays, which is what lets the self-check run it
-in a throwaway console harness with neither the framework nor a server present.
+arrives as `double`, `int` and arrays, so the formula can be read and reasoned
+about without the framework in the way.
 
 ---
 
@@ -121,7 +120,7 @@ plugin, not the type name.
 | Step | Work |
 |---|---|
 | Constructor | nothing |
-| `Load` | `EloMathSelfCheck.Run()`, config, `Core.Registrator.Register(_tracker)`, core-event subscriptions |
+| `Load` | config, `Core.Registrator.Register(_tracker)`, core-event subscriptions |
 | `UseSharedInterface` / `OnSharedInterfaceInjected` | acquire through the bridge; `RegisterMigrations(assembly)` |
 | `OnCoreReady` | resolve the table name, read core's settings, run the `UseCoreRankingLogic` check |
 | `OnAllPluginsLoaded` | if `Ranks` is absent, log one ungated warning and stay idle |
@@ -654,39 +653,28 @@ not expect to look the player up.
 
 ---
 
-## 9. Self-check
+## 9. Rating invariants
 
-`EloMathSelfCheck.Run()` executes in `Load` before anything else, throwing on
-failure. `EloMath` is pure and names no framework type, so the same assertions
-run in a console harness.
+Nothing asserts these at runtime. Every one of them is **silent when broken** —
+the module keeps running and the numbers stay plausible — so check them by reading
+whenever `EloMath` changes.
 
-| Assertion | Catches |
+| Invariant | What breaking it looks like |
 |---|---|
-| `Expected(r, r) == 0.5`; a 400-point gap gives ≈ `0.9091`; `Expected(a,b) + Expected(b,a) == 1` | an inverted sign in the exponent, which is invisible on even teams |
+| `Expected(r, r) == 0.5`; a 400-point gap gives ≈ `0.9091`; `Expected(a,b) + Expected(b,a) == 1` | an inverted sign in the exponent, invisible on even teams |
 | Shrinkage with `n = 0` yields `S_adj == E`, giving zero delta | a division that produces `NaN` on an empty session |
 | Shrinkage is monotonic in `n` toward the unshrunk value | an inverted weighting that damps *long* sessions instead of short ones |
-| 13-0 even teams, `c = 10` → `+14.13`; full 13-8 → `+4.03`; join-at-18 4-0 → `+1.36`; 2-round cameo → `+0.40` | any coefficient drift away from the figures published in features.md |
-| A double-counted accrual (`S̄ = 2.0`) still respects the envelope ceiling | the envelope clamp being removed or mis-bounded |
-| `E = 0.95`, win, worst percentile → delta is positive | the sign floor missing, which is the case the envelope does not catch |
-| Abandon penalty always reduces the delta by exactly `Penalty` | the penalty being folded inside the sign floor |
-| Four identical performances all land on the median | ties not sharing a rank, which orders identical play arbitrarily |
+| 13-0 even teams, `c = 10` → `+14.13`; full 13-8 → `+4.03`; join-at-18 4-0 → `+1.36`; 2-round cameo → `+0.40` | coefficient drift away from the figures published in features.md |
+| A double-counted accrual (`S̄ = 2.0`) still respects the envelope ceiling | the envelope clamp removed or mis-bounded |
+| `E = 0.95`, win, worst percentile → delta is positive | the sign floor missing, which the envelope does not catch |
+| Abandon penalty always reduces the delta by exactly `Penalty` | the penalty folded inside the sign floor |
+| Four identical performances all land on the median | ties not sharing a rank, ordering identical play arbitrarily |
 
-> **The envelope assertion needs the corrupted input, not the randomised sweep.**
-> With an actual score in `[0, 1]`, `K(S_adj − E)` already lands inside the
-> envelope algebraically, so the clamp is unreachable on valid data and a sweep
-> over valid data cannot tell whether it is there. It exists to bound an
-> upstream accrual bug — a round credited twice — so it is tested with exactly
-> that. This was found by mutation testing: deleting the clamp passed a 20 000
-> iteration randomised sweep.
-
-Each is mutation-tested before the module is reported working: break the logic,
-confirm the check fails with a message naming the value and the expectation.
-
-Until `EloMath` exists, [`verify-figures.ps1`](verify-figures.ps1) is the
-runnable check standing in for it — it reproduces every figure published in
-[features.md](features.md) and the abandon-threshold table, for any `K`, `c` and
-`Penalty`. It is also what caught the published abandon numbers being wrong,
-so it stays alongside the C# self-check rather than being replaced by it.
+> **The envelope invariant only shows up on corrupted input.** With an actual
+> score in `[0, 1]`, `K(S_adj − E)` already lands inside the envelope
+> algebraically, so the clamp is unreachable on valid data. It exists to bound an
+> upstream accrual bug — a round credited twice. Deleting it passed a 20 000
+> iteration randomised sweep, which is why reading beats sampling here.
 
 ---
 

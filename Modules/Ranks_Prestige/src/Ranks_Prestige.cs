@@ -34,7 +34,6 @@ public sealed class RanksPrestige : BasePlugin
     {
         _logger = Core.LoggerFactory.CreateLogger("Ranks_Prestige");
 
-        PrestigeSelfCheck.Run();
         LoadConfiguration();
 
         var ladder = PrestigeLadder.Build(_config, _logger);
