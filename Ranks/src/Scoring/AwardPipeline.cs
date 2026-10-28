@@ -332,10 +332,12 @@ internal sealed class AwardPipeline
     /// that string shown verbatim — core cannot ship a translation key for a reason it has never
     /// heard of, and a missing key renders the literal {lang}.{key} marker to the player. An
     /// arbiter avoids that by resolving its own text and passing it as <c>DisplayText</c>.
+    /// Membership in the closed catalogue is the test, not a key prefix: core's keys are bare
+    /// since the rename, so nothing about the string itself identifies one.
     /// </remarks>
     private string DescribeReason(string reason, string? displayText = null) =>
         displayText
-        ?? (reason.StartsWith("core.", StringComparison.Ordinal) ? _core.Localizer[$"event.{reason}"] : reason);
+        ?? (PointEvents.Defaults.ContainsKey(reason) ? _core.Localizer[$"event.{reason}"] : reason);
 
     private void ReportRankChange(RanksConfig config, PlayerRecord record, int oldIndex)
     {

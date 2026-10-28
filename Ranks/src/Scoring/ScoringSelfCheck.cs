@@ -6,7 +6,7 @@ namespace Ranks.Scoring;
 /// <summary>Asserts the scoring and ladder invariants the config's documentation promises.</summary>
 /// <remarks>
 /// These exist because the failure mode is silence: a broken anchor makes every configured
-/// <c>core.kill</c> value mean something other than what it says, and nothing in the game reports
+/// <c>kill</c> value mean something other than what it says, and nothing in the game reports
 /// it — a server just scores slightly wrong forever. Microseconds at load, and the only check this
 /// logic gets.
 /// </remarks>

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace Ranks.Config;
 
 /// <summary>Everything in <c>config.jsonc</c>.</summary>
@@ -100,8 +102,25 @@ public sealed class ScoreboardOptions
     /// <remarks>
     /// Premier renders the point total itself as a CS Rating, coloured by CS2's own bands,
     /// which is what makes the seven-band ladder legible without mapping anything.
+    /// <para>
+    /// A string, not the enum: SwiftlyS2 generates config.jsonc from this model with the stock
+    /// serializer, which writes an enum as its number — an operator would get <c>1</c> with no
+    /// hint of what else is legal. <see cref="Mode"/> parses it, and because Enum.TryParse also
+    /// accepts the numeric form a file already carrying <c>1</c> keeps working.
+    /// </para>
     /// </remarks>
-    public RankDisplayMode RankMode { get; set; } = RankDisplayMode.Premier;
+    [Description("Off, Premier, Competitive, Wingman, DangerZone or Custom.")]
+    public string RankMode { get; set; } = nameof(RankDisplayMode.Premier);
+
+    /// <summary>The parsed <see cref="RankMode"/>, falling back to Premier.</summary>
+    /// <remarks>
+    /// Never Off on a typo: silently blanking every scoreboard is the one outcome an operator
+    /// cannot diagnose from the symptom. ConfigValidator warns about the value separately.
+    /// </remarks>
+    public RankDisplayMode Mode =>
+        Enum.TryParse<RankDisplayMode>(RankMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : RankDisplayMode.Premier;
 
     public bool ScoreSync { get; set; } = false;
 

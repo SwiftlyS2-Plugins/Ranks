@@ -22,6 +22,20 @@ internal static partial class ConfigValidator
         ClampRank(config.Rank, logger);
         ClampPoints(config.Points, logger);
         ClampVip(config.Vip, logger);
+        WarnOnUnknownRankMode(config.Scoreboard, logger);
+    }
+
+    /// <remarks>
+    /// Only a warning: <see cref="ScoreboardOptions.Mode"/> already falls back to Premier, and a
+    /// typo here would otherwise be invisible — the scoreboard just renders a mode nobody chose.
+    /// </remarks>
+    private static void WarnOnUnknownRankMode(ScoreboardOptions scoreboard, ILogger logger)
+    {
+        if (Enum.TryParse<RankDisplayMode>(scoreboard.RankMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)) return;
+
+        logger.LogWarning(
+            "Ranks: Scoreboard.RankMode '{Value}' is not a known mode; using {Fallback}. Valid values: {Valid}.",
+            scoreboard.RankMode, RankDisplayMode.Premier, string.Join(", ", Enum.GetNames<RankDisplayMode>()));
     }
 
     private static void RequireSafeAffix(string value, string key)

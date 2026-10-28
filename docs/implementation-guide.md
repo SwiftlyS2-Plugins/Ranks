@@ -366,7 +366,7 @@ Three rules make that safe:
    award picks up the change.
 
 **Derived lookups are rebuilt in the reload handler, not computed per use.** The
-points catalogue is the clear case: resolving `core.headshot` through a string
+points catalogue is the clear case: resolving `headshot` through a string
 dictionary on every kill is wasted work when the key set is closed and known at
 load. Build an array indexed by the event enum once per reload and index it.
 

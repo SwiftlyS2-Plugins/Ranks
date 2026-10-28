@@ -418,7 +418,7 @@ death, `ranks_players.deaths` counts every death (FR-DB-04), and the
 reconciliation in features.md §1 depends on the two agreeing.
 
 **Kills do apply it**, matching the call core makes: with friendly fire off, a
-team kill is `core.team_kill` rather than `core.kill` and does not increment
+team kill is `team_kill` rather than `kill` and does not increment
 `ranks_players.kills` either.
 
 #### The FFA mismatch warning

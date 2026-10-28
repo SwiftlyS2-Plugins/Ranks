@@ -84,7 +84,7 @@ ships its own numbers rather than injecting them into core's.
 
 | Term | Meaning |
 |---|---|
-| **Event** | A named, scorable occurrence (`core.kill`, `deathrun.map_completed`). The unit of extensibility. |
+| **Event** | A named, scorable occurrence (`kill`, `deathrun.map_completed`). The unit of extensibility. |
 | **Stat** | A named per-player counter (`core.kills`, `deathrun.maps_completed`). May or may not be tied to an event. |
 | **Rank** | A named tier on the ladder, entered at a point threshold. |
 | **Skill group** | The CS2-native scoreboard rank icon (index 1–18 in Competitive mode). |
@@ -191,7 +191,7 @@ keeping it that way is what makes FR-DB-06's single-statement upsert portable.
 | `steam_id` | `BIGINT UNSIGNED` | **PK.** SteamID64, never a rendered `STEAM_x:y:z` string. |
 | `name` | `VARCHAR(128)` | Last known name. utf8mb4 on MySQL. Required by `!top`. |
 | `points` | `INT` | |
-| `kills` | `INT` | **Enemy kills only.** A team kill is its own event (`core.team_kill`) and does not increment this. Counting it would make `!top kills` farmable by killing teammates. |
+| `kills` | `INT` | **Enemy kills only.** A team kill is its own event (`team_kill`) and does not increment this. Counting it would make `!top kills` farmable by killing teammates. |
 | `deaths` | `INT` | **Every death**, whatever killed the player — enemy, teammate, world or their own hand. A death is not farmable, and excluding any source would make the figure disagree with the scoreboard. |
 | `assists` | `INT` | |
 | `round_wins` | `INT` | |
@@ -587,7 +587,7 @@ is not the match, and a bot is not a player. With either `false`, the matching
 > This reverses the earlier rule, under which both suppressed only the award. That
 > version was unsound: `AwardKillstreak` has no counterparty to pass, so the bot gate
 > in `PassesGates` never saw one and **killstreak tiers paid out against bots** on any
-> server that left them in — `core.streak_godlike` is 15 points, farmable against AI.
+> server that left them in — `streak.godlike` is 15 points, farmable against AI.
 > Gating each award site individually cannot fix that, because a streak is a property
 > of the round rather than of one kill; only dropping the event can.
 
@@ -616,7 +616,7 @@ because that would have core calling out to module code mid-award.
 | Multiplier | Applies to | Setting |
 |---|---|---|
 | **VIP** | every core award | `Vip.Multiplier` (default `1.25`) when the player holds any flag in `Vip.Flags` (default `["@ranks/vip"]`) |
-| **Dynamic kill / death** | `core.kill` and `core.death` only | FR-PTS-05, each under its own toggle |
+| **Dynamic kill / death** | `kill` and `death` only | FR-PTS-05, each under its own toggle |
 
 They are multiplied together, then the result is rounded once (FR-PTS-02 step 5).
 
@@ -660,7 +660,7 @@ event they scale and which bounds they read.
 | `Points.DynamicKillMin` | `0.5` | Kill multiplier when the victim is as weak as possible relative to the attacker |
 | `Points.DynamicKillMax` | `3.0` | Kill multiplier when the victim is as strong as possible relative to the attacker |
 
-**Scope: the victim's `core.death` deduction and the attacker's `core.kill`
+**Scope: the victim's `death` deduction and the attacker's `kill`
 reward.** Each is gated by its own toggle and reads its own bounds, so a server
 may scale one, both or neither.
 
@@ -700,7 +700,7 @@ tuned apart:
 The curve is continuous and piecewise-linear, with both halves pinned at `1.0`,
 so a near-equal matchup is a near-no-op. **That `d = 0 -> 1.0` anchor is the
 behaviour the config documents** — any replacement formula must preserve it, or
-the configured `core.kill` and `core.death` values stop meaning what they say.
+the configured `kill` and `death` values stop meaning what they say.
 
 #### Why `max(Pv, Pa)` is the denominator
 
@@ -716,7 +716,7 @@ fresh-player case this feature exists to handle.
 - **No attacker** — suicide, world damage, fall damage, console kill. The death
   multiplier is `1.0` and the configured value applies as-is; there is no
   counterparty to compare against. The kill side does not arise: no attacker
-  means no `core.kill`.
+  means no `kill`.
 - **Bot counterparty.** Governed by `Rank.PointsForBots`: when bots score no
   points the event is gated out entirely and the multiplier never runs. When
   they do count, a bot has no record and counts as `0`. On the kill side that
@@ -724,7 +724,7 @@ fresh-player case this feature exists to handle.
   prices itself at the floor, which is a useful property rather than an
   accident.
 - **Both players on `0` points.** `d = 0` -> `1.0`. Two fresh players are equal.
-- **Team kill** is its own event (`core.team_kill`), not `core.death`, so it is
+- **Team kill** is its own event (`team_kill`), not `death`, so it is
   unaffected.
 - The formula assumes non-negative points, which FR-RNK-04 guarantees.
   `Rank.MinPoints` must therefore stay `>= 0`.
@@ -757,32 +757,32 @@ quantity on live servers, with the three corrections noted below the table.
 
 | Event | Default | Event | Default |
 |---|--:|---|--:|
-| `core.kill` | `2` | `core.bomb_plant` | `10` |
-| `core.death` | `-3` | `core.bomb_defuse` | `10` |
-| `core.assist` | `1` | `core.bomb_defuse_others` | `10` |
-| `core.assist_flash` | `1` | `core.bomb_exploded` | `10` |
-| `core.headshot` | `3` | `core.bomb_pickup` | `2` |
-| `core.suicide` | `0` | `core.bomb_drop` | `-2` |
-| `core.team_kill` | `0` | `core.hostage_rescue` | `10` |
-| `core.team_assist` | `0` | `core.hostage_rescue_all` | `10` |
-| `core.noscope` | `5` | `core.hostage_hurt` | `0` |
-| `core.wallbang` | `4` | `core.hostage_kill` | **`-20`** |
-| `core.through_smoke` | `3` | `core.round_win` | `2` |
-| `core.blind_kill` | `3` | `core.round_lose` | `-2` |
-| `core.long_distance` | `3` | `core.mvp` | `10` |
-| `core.knife_kill` | `5` | `core.match_win` | **`15`** |
-| `core.taser_kill` | `5` | `core.match_lose` | **`-5`** |
-| `core.grenade_kill` | `5` | | |
-| `core.inferno_kill` | `5` | | |
-| `core.impact_kill` | `5` | | |
+| `kill` | `2` | `bomb_plant` | `10` |
+| `death` | `-3` | `bomb_defuse` | `10` |
+| `assist` | `1` | `bomb_defuse_others` | `10` |
+| `assist_flash` | `1` | `bomb_exploded` | `10` |
+| `headshot` | `3` | `bomb_pickup` | `2` |
+| `suicide` | `0` | `bomb_drop` | `-2` |
+| `team_kill` | `0` | `hostage_rescue` | `10` |
+| `team_assist` | `0` | `hostage_rescue_all` | `10` |
+| `noscope` | `5` | `hostage_hurt` | `0` |
+| `wallbang` | `4` | `hostage_kill` | **`-20`** |
+| `through_smoke` | `3` | `round_win` | `2` |
+| `blind_kill` | `3` | `round_lose` | `-2` |
+| `long_distance` | `3` | `mvp` | `10` |
+| `knife_kill` | `5` | `match_win` | **`15`** |
+| `taser_kill` | `5` | `match_lose` | **`-5`** |
+| `grenade_kill` | `5` | | |
+| `inferno_kill` | `5` | | |
+| `impact_kill` | `5` | | |
 
 Three deliberate departures from the source config, all bolded above:
 
-1. **`core.hostage_kill` is `-20`, not `+20`.** The upstream default rewards
+1. **`hostage_kill` is `-20`, not `+20`.** The upstream default rewards
    killing a hostage at double the value of rescuing one. That is a sign error,
    not a design choice — `hostage_hurt` sits at `0` right beside it, so the
    intent was clearly a penalty.
-2. **`core.match_win` / `core.match_lose` have no upstream counterpart**, because
+2. **`match_win` / `match_lose` have no upstream counterpart**, because
    LVL Ranks models no match. `15` / `-5` is an invention, sized so a match is
    worth roughly a good round's MVP without dominating a session. Revisit once
    FR-PTS-06's deprecation risk on `EventCsWinPanelMatch` is settled on a live
@@ -830,19 +830,19 @@ moment, and the recipients are each team's `PlayerControllers`.
 
 Opt-in per-round kill accumulation (`Points.KillStreaksEnabled`, default
 `true`). **Eleven tiers**, covering 2 through 12-or-more kills, each a
-`core.streak_*` event so they are tunable like any other.
+`streak.*` event so they are tunable like any other.
 `Points.SecondsBetweenKills` (`0` = no time limit) bounds the window; streaks
 reset on death and, optionally, on round end
 (`Points.KillstreakResetOnRoundEnd`).
 
 | Kills | Event | Default | Kills | Event | Default |
 |--:|---|--:|--:|---|--:|
-| 2 | `core.streak_double` | `5` | 8 | `core.streak_ultra` | `11` |
-| 3 | `core.streak_triple` | `6` | 9 | `core.streak_killing_spree` | `12` |
-| 4 | `core.streak_domination` | `7` | 10 | `core.streak_monster` | `13` |
-| 5 | `core.streak_rampage` | `8` | 11 | `core.streak_unstoppable` | `14` |
-| 6 | `core.streak_mega` | `9` | 12+ | `core.streak_godlike` | `15` |
-| 7 | `core.streak_ownage` | `10` | | | |
+| 2 | `streak.double` | `5` | 8 | `streak.ultra` | `11` |
+| 3 | `streak.triple` | `6` | 9 | `streak.killing_spree` | `12` |
+| 4 | `streak.domination` | `7` | 10 | `streak.monster` | `13` |
+| 5 | `streak.rampage` | `8` | 11 | `streak.unstoppable` | `14` |
+| 6 | `streak.mega` | `9` | 12+ | `streak.godlike` | `15` |
+| 7 | `streak.ownage` | `10` | | | |
 
 Streaks are the one count-based case core keeps, because a streak is a property
 of the player's round rather than of any single kill and needs no attribute
@@ -865,7 +865,7 @@ system inside core is not the answer.
 ### FR-PTS-09 — Combination scoring is a module, not core
 
 The flat catalogue in FR-PTS-06 stacks additively: a knife headshot already
-scores `core.kill` + `core.headshot` + `core.knife_kill`. What it cannot express
+scores `kill` + `headshot` + `knife_kill`. What it cannot express
 is a value for the **combination** — "a knife headshot is worth a 50-point
 bonus", or "a triple kill with a grenade".
 
@@ -957,8 +957,8 @@ server works out near `+94` — 25 kills, 20 deaths, 10 headshots, 5 assists, ev
 round win/loss, 2 MVPs, a couple of bomb events and a few short streaks. That is
 **~190 points/hour**, so Gold is roughly **158 hours** of play.
 
-The spread matters more than the average, because `core.kill` (`2`) is smaller
-than `core.death` (`-3`):
+The spread matters more than the average, because `kill` (`2`) is smaller
+than `death` (`-3`):
 
 | Player | Net per map | Per hour | Hours to Gold |
 |---|--:|--:|--:|
@@ -970,7 +970,7 @@ than `core.death` (`-3`):
 Everything positive comes from headshots, objectives, MVPs and streaks. That is
 a real design statement and worth stating in the shipped config's comments: the
 ladder rewards *playing the round*, not fragging, and a below-average player
-barely moves. An operator who wants a gentler curve raises `core.kill` to `3`
+barely moves. An operator who wants a gentler curve raises `kill` to `3`
 before touching anything else.
 
 Saturation (see the warning above) arrives in about a season at this rate: every
@@ -1374,12 +1374,12 @@ in five seconds" is a core streak. With same-tick as the only window, an earlier
 
 **Suppression.** A global `SuppressCoreAwards` switch makes a matched combo the
 whole award for that kill instead of a bonus on top; a kill matching no combo is
-unaffected, or an ordinary kill would pay nothing. It suppresses `core.kill`, the
+unaffected, or an ordinary kill would pay nothing. It suppresses `kill`, the
 attribute awards and the weapon class — but never the killstreak, which belongs to
 the round rather than the kill, and **never the stat counters** (FR-PTS-03).
 
 > This reverses an earlier decision (Q10). That draft was rejected because "by the
-> time the module sees the kill, core has already awarded `core.headshot` with the
+> time the module sees the kill, core has already awarded `headshot` with the
 > VIP and dynamic-kill multipliers applied (FR-PTS-04, FR-PTS-05), so the module
 > cannot compute an exact offset to cancel it." That reasoning holds only while the
 > module observes the kill *after* core. FR-API-11 inverts the order — core consults
@@ -1552,9 +1552,9 @@ does not know a module's tables exist, so it cannot read, write or sort them —
 that is the deliberate cost of FR-DB-04's all-fixed-columns shape, and of the
 dependency rule in FR-PTS-01.
 
-> **Stat keys are plural; point-event keys are singular.** `core.kills` is the
-> lifetime counter, `core.kill` is the priced event (FR-PTS-06) — two different
-> namespaces one character apart. `GetStat(id, "core.kill")` is not an error and
+> **Stat keys keep the `core.` prefix; point-event keys dropped it.** `core.kills`
+> is the lifetime counter, `kill` is the priced event (FR-PTS-06) — two different
+> namespaces. `GetStat(id, "kill")` is not an error and
 > does not throw; it returns `0` forever.
 
 Rating modules depend on this read path: an Elo model needs kills, deaths and
@@ -1632,7 +1632,7 @@ sealed record RanksRankChangedArgs(
 sealed class RanksPointsChangingArgs
 {
     public required ulong  SteamId              { get; init; }
-    public required string EventKey             { get; init; }   // e.g. "core.death"
+    public required string EventKey             { get; init; }   // e.g. "death"
     public required ulong? CounterpartySteamId  { get; init; }   // attacker on a death, victim on a kill
     public required int    BaseAmount           { get; init; }   // configured value × count, pre-multiplier
     public          int    Amount               { get; set; }    // mutate this

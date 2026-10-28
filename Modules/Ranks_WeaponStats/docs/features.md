@@ -48,7 +48,7 @@ filtered by it. Being killed by a teammate or by the world is still a death, and
 source would break the reconciliation below.
 
 **Kills follow the switch, and that mirrors core.** With it `false`, a team kill
-is excluded here exactly as `core.team_kill` keeps it out of
+is excluded here exactly as `team_kill` keeps it out of
 `ranks_players.kills`. Counting the kill while excluding the hits that produced
 it would be incoherent, and counting it on a team server makes a kills
 leaderboard farmable.
@@ -100,7 +100,7 @@ A **bug** also breaks it, and that is the one to care about: any event the
 module drops without being told to. §1.3 exists for exactly that reason.
 
 `headshots` has no counterpart — core's nine counters (FR-DB-04) do not include
-one. `core.headshot` is a priced *event*, not a stored stat, so per-weapon
+one. `headshot` is a priced *event*, not a stored stat, so per-weapon
 headshots are new data with nothing to reconcile against.
 
 ### 1.2 The two bot switches

@@ -61,7 +61,7 @@ public sealed class RanksPointsChangingArgs
 {
     public required ulong SteamId { get; init; }
 
-    /// <summary>Core's event key, e.g. <c>core.death</c>.</summary>
+    /// <summary>Core's event key, e.g. <c>death</c>.</summary>
     public required string EventKey { get; init; }
 
     /// <summary>Attacker on a death, victim on a kill; null when there is no counterparty.</summary>

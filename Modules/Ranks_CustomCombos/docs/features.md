@@ -165,7 +165,7 @@ silently never matches is indistinguishable from one that is merely hard to trig
 ### 4.1 Additive by default
 
 A matched combo pays **on top of** core's flat catalogue: a no-scope headshot scores
-`core.kill + core.headshot + core.noscope + combo.noscope_hs`. The configured number is a
+`kill + headshot + noscope + combo.noscope_hs`. The configured number is a
 bonus, not a total — an operator prices a combo knowing the components have already paid.
 
 ### 4.2 Suppression
@@ -193,7 +193,7 @@ Suppression is scoped deliberately:
 
 | | Suppressed? |
 |---|---|
-| `core.kill`, attribute awards, weapon class | yes |
+| `kill`, attribute awards, weapon class | yes |
 | Killstreak | **no** — a streak is a property of the round, not of this kill |
 | `kills` / `deaths` / `assists` counters | **never** |
 

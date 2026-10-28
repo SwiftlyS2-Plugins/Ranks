@@ -25,7 +25,7 @@ internal sealed class ConfigHost<T> : IDisposable
     private volatile T _current;
     private string _lastApplied;
 
-    private ConfigHost(ISwiftlyCore core, string fileName, string sectionName, Action<T, ILogger>? validate, ILogger logger, T initial)
+    private ConfigHost(ISwiftlyCore core, string fileName, string sectionName, Action<T, ILogger>? validate, ILogger logger, T initial, string fingerprint)
     {
         _fileName = fileName;
         _sectionName = sectionName;
@@ -33,7 +33,7 @@ internal sealed class ConfigHost<T> : IDisposable
         _validate = validate;
         _logger = logger;
         _current = initial;
-        _lastApplied = Fingerprint(initial);
+        _lastApplied = fingerprint;
 
         _subscription = ChangeToken.OnChange(_root.GetReloadToken, Apply);
     }
@@ -61,9 +61,15 @@ internal sealed class ConfigHost<T> : IDisposable
 
         var initial = Bind(core.Configuration.Manager, sectionName);
 
+        // Taken before validation, because validation mutates — CommandsConfig.Validate dedupes the
+        // aliases the binder doubled. Apply() fingerprints the raw bind, so fingerprinting the
+        // validated one here would leave the two describing different shapes, and the next save of
+        // ANY file would re-apply this host and log a reload nobody asked for.
+        var fingerprint = Fingerprint(initial);
+
         validate?.Invoke(initial, logger);
 
-        return new ConfigHost<T>(core, fileName, sectionName, validate, logger, initial);
+        return new ConfigHost<T>(core, fileName, sectionName, validate, logger, initial, fingerprint);
     }
 
     /// <summary>Re-binds on a file edit, ignoring notifications that carry no change.</summary>

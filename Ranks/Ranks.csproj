@@ -32,6 +32,20 @@
     <PackageReference Include="FluentMigrator.Runner.MySql" Version="8.*" />
     <PackageReference Include="FluentMigrator.Runner.Postgres" Version="8.*" />
     <PackageReference Include="FluentMigrator.Runner.SQLite" Version="8.*" />
+
+    <!-- One ADO driver per engine FR-DB-01 claims. SwiftlyS2 depends on all three, but it is
+         referenced ExcludeAssets="runtime" above, which strips its transitive runtime assets too —
+         so none of them reach this plugin's folder or its .deps.json, and the host's copies are not
+         a substitute: McMaster.NETCore.Plugins resolves a plugin's assemblies from that deps.json,
+         and FluentMigrator opens its own connection from the connection string rather than taking
+         the host's. Naming them directly is what puts them next to Ranks.dll; without that the
+         runner throws before the first CREATE TABLE and the database silently stays empty.
+         Versions track SwiftlyS2's own so one driver is loaded, not two: a lower floor trips
+         NU1605. The names are what each runner probes for and cannot be swapped — MySqlConnector
+         (or MySql.Data), Npgsql, System.Data.SQLite (or Microsoft.Data.Sqlite). -->
+    <PackageReference Include="MySqlConnector" Version="2.*" />
+    <PackageReference Include="Npgsql" Version="10.*" />
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.*" />
   </ItemGroup>
 
   <ItemGroup>

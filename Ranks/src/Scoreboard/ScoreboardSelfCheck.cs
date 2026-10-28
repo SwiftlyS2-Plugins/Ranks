@@ -76,10 +76,20 @@ internal static class ScoreboardSelfCheck
     private static void OverlayModeFallsBackRatherThanBlanking()
     {
         var config = new RanksConfig();
-        config.Scoreboard.RankMode = RankDisplayMode.Premier;
+        config.Scoreboard.RankMode = nameof(RankDisplayMode.Premier);
 
         Require(ScoreboardService.ResolveMode(config, null) == RankDisplayMode.Premier,
             "no overlay must use the configured mode");
+
+        config.Scoreboard.RankMode = "Premiere";
+        Require(ScoreboardService.ResolveMode(config, null) == RankDisplayMode.Premier,
+            "an unparseable configured mode must fall back to Premier, not Off");
+
+        config.Scoreboard.RankMode = "3";
+        Require(ScoreboardService.ResolveMode(config, null) == RankDisplayMode.Wingman,
+            "the numeric form a pre-string config carries must still parse");
+
+        config.Scoreboard.RankMode = nameof(RankDisplayMode.Premier);
 
         Require(ScoreboardService.ResolveMode(config, new RanksDisplayOverride()) == RankDisplayMode.Premier,
             "an overlay naming no mode must use the configured mode");

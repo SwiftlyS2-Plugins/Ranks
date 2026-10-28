@@ -237,7 +237,7 @@ and suppressing only the last would be unpredictable. It is rejected at load.
 
 | | Suppressed? |
 |---|---|
-| `core.kill`, attribute awards, weapon class | yes |
+| `kill`, attribute awards, weapon class | yes |
 | Killstreak | **no** — a streak belongs to the round, not this kill |
 | `kills` / `deaths` / `assists` counters | **never** |
 

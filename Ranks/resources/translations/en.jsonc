@@ -7,37 +7,37 @@
   // {0}, {1}, ... are positional arguments; keep them in every translation even if the word order
   // changes. Colour tokens ([gold], [lime], [default], ...) are SwiftlyS2's chat colours.
 
-  "prefix": "[ [gold]Ranks[default] ] ",
+  "prefix": "[ [darkred]Ranks [default]] ",
 
   // ---- Errors -------------------------------------------------------------
 
-  "error.players_only": "[red]That command can only be used by a player.",
+  "error.players_only": "[red]This command can only be used by a player.",
   "error.not_loaded": "[red]Your rank data has not loaded yet. Try again in a moment.",
 
-  // ---- Point feedback -----------------------------------------------------
+  // ---- XP feedback -----------------------------------------------------
 
-  "points.gained": "[lime]+{0}[default] points for [gold]{1}[default]. Total: [lime]{2}[default].",
-  "points.lost": "[red]-{0}[default] points for [gold]{1}[default]. Total: [lime]{2}[default].",
+  "XP.gained": "[lime]+{0}[default] XP [grey]({2}) [default]{2}",
+  "XP.lost": "[red]-{0}[default] XP [grey]({2}) [default]{2}",
 
-  // Used instead of the two above when Points.ShowPlayerNames is on and there is a counterparty.
-  "points.gained_vs": "[lime]+{0}[default] points for [gold]{1}[default] against [lime]{2}[default]. Total: [lime]{3}[default].",
-  "points.lost_vs": "[red]-{0}[default] points for [gold]{1}[default] against [lime]{2}[default]. Total: [lime]{3}[default].",
+  // Used instead of the two above when XP.ShowPlayerNames is on and there is a counterparty.
+  "XP.gained_vs": "[lime]+{0}[default] XP for [gold]{1}[default] against [lime]{2}[default]. Total: [lime]{3}[default].",
+  "XP.lost_vs": "[red]-{0}[default] XP for [gold]{1}[default] against [lime]{2}[default]. Total: [lime]{3}[default].",
 
-  "points.summary": "Round total: [gold]{0}{1}[default] points. You now have [lime]{2}[default].",
+  "XP.summary": "Round total: [gold]{0}{1}[default] XP. You now have [lime]{2}[default].",
 
   // ---- Rank changes -------------------------------------------------------
 
-  "rank.promoted": "[green]Rank up![default] You are now [gold]{0}[default] with [lime]{1}[default] points.",
-  "rank.demoted": "[red]Rank down.[default] You are now [gold]{0}[default] with [lime]{1}[default] points.",
+  "rank.promoted": "[green]Rank up![default] You are now [gold]{0}[default] with [lime]{1}[default] XP.",
+  "rank.demoted": "[red]Rank down.[default] You are now [gold]{0}[default] with [lime]{1}[default] XP.",
 
   // ---- Settings -----------------------------------------------------------
 
-  "settings.point_messages_on": "[green]Point messages enabled.",
-  "settings.point_messages_off": "[red]Point messages disabled.",
+  "settings.XP_messages_on": "[green]XP messages enabled.",
+  "settings.XP_messages_off": "[red]XP messages disabled.",
 
   // ---- Self reset ---------------------------------------------------------
 
-  "reset.confirm": "[red]This wipes your points and statistics.[default] Type the command again within [gold]{0}[default] seconds to confirm.",
+  "reset.confirm": "[red]This wipes your XP and statistics.[default] Type the command again within [gold]{0}[default] seconds to confirm.",
   "reset.done": "[green]Your rank has been reset.",
 
   // ---- Admin --------------------------------------------------------------
@@ -45,7 +45,7 @@
   "admin.usage": "[red]Usage:[default] {0} <target> <amount>",
   "admin.bad_amount": "[red]'{0}' is not a number.",
   "admin.no_target": "[red]No player matched '{0}'.",
-  "admin.adjusted": "[lime]{0}[default] now has [gold]{1}[default] points.",
+  "admin.adjusted": "[lime]{0}[default] now has [gold]{1}[default] XP.",
   "admin.reset": "[lime]{0}[default] has been reset.",
 
   // ---- Statistics ---------------------------------------------------------
@@ -60,18 +60,18 @@
 
   "menu.rank.title": "Your rank",
   "menu.rank.current": "Rank: {0}",
-  "menu.rank.points": "Points: {0}",
-  "menu.rank.next": "{0} in {1} points",
+  "menu.rank.XP": "XP: {0}",
+  "menu.rank.next": "{0} in {1} XP",
   "menu.rank.top_band": "Highest rank reached",
   "menu.rank.ladder": "Show all ranks",
   "menu.rank.stats": "Show my statistics",
 
   "menu.ladder.title": "Rank ladder",
-  "menu.ladder.row": "{0} - {1} points",
-  "menu.ladder.row_current": "> {0} - {1} points",
+  "menu.ladder.row": "{0} - {1} XP",
+  "menu.ladder.row_current": "> {0} - {1} XP",
 
   "menu.settings.title": "Settings",
-  "menu.settings.point_messages": "Point messages",
+  "menu.settings.XP_messages": "XP messages",
 
   "menu.top.title": "Leaderboard",
   "menu.top.row": "#{0} {1} - {2}",
@@ -82,67 +82,67 @@
   //
   // Shown by sw_help. Not a config field: it is player-facing, so it is translatable.
 
-  "command.rank.help": "Show your rank, points and progress to the next band.",
+  "command.rank.help": "Show your rank, XP and progress to the next band.",
   "command.ranks.help": "Show the full rank ladder.",
-  "command.top.help": "Show the points leaderboard.",
+  "command.top.help": "Show the XP leaderboard.",
   "command.stats.help": "Show your kills, deaths and objective statistics.",
   "command.settings.help": "Open your Ranks preferences.",
-  "command.resetmyrank.help": "Reset your own points and statistics. Requires confirmation.",
-  "command.togglepointmsg.help": "Turn your point chat messages on or off.",
-  "command.setpoints.help": "Set a player's points to an exact value.",
-  "command.givepoints.help": "Add points to a player.",
-  "command.removepoints.help": "Subtract points from a player.",
-  "command.resetrank.help": "Reset a player's points and statistics.",
+  "command.resetmyrank.help": "Reset your own XP and statistics. Requires confirmation.",
+  "command.toggleXPmsg.help": "Turn your XP chat messages on or off.",
+  "command.setXP.help": "Set a player's XP to an exact value.",
+  "command.giveXP.help": "Add XP to a player.",
+  "command.removeXP.help": "Subtract XP from a player.",
+  "command.resetrank.help": "Reset a player's XP and statistics.",
 
   // ---- Event names --------------------------------------------------------
   //
-  // The label shown in a point message. Only core's own keys are translated; a module calling
-  // AddPoints with its own reason string has that string shown verbatim, since core cannot ship
+  // The label shown in a XP message. Only core's own keys are translated; a module calling
+  // AddXP with its own reason string has that string shown verbatim, since core cannot ship
   // a key for a reason it has never heard of.
 
-  "event.core.kill": "a kill",
-  "event.core.death": "dying",
-  "event.core.assist": "an assist",
-  "event.core.assist_flash": "a flash assist",
-  "event.core.headshot": "a headshot",
-  "event.core.suicide": "a suicide",
-  "event.core.team_kill": "a team kill",
-  "event.core.team_assist": "a team assist",
-  "event.core.noscope": "a no-scope",
-  "event.core.wallbang": "a wallbang",
-  "event.core.through_smoke": "a kill through smoke",
-  "event.core.blind_kill": "a blind kill",
-  "event.core.long_distance": "a long-distance kill",
-  "event.core.knife_kill": "a knife kill",
-  "event.core.taser_kill": "a taser kill",
-  "event.core.grenade_kill": "a grenade kill",
-  "event.core.inferno_kill": "a fire kill",
-  "event.core.impact_kill": "an impact kill",
-  "event.core.bomb_plant": "planting the bomb",
-  "event.core.bomb_defuse": "defusing the bomb",
-  "event.core.bomb_defuse_others": "your team defusing the bomb",
-  "event.core.bomb_exploded": "the bomb exploding",
-  "event.core.bomb_pickup": "picking up the bomb",
-  "event.core.bomb_drop": "dropping the bomb",
-  "event.core.hostage_rescue": "rescuing a hostage",
-  "event.core.hostage_rescue_all": "all hostages rescued",
-  "event.core.hostage_hurt": "hurting a hostage",
-  "event.core.hostage_kill": "killing a hostage",
-  "event.core.round_win": "winning the round",
-  "event.core.round_lose": "losing the round",
-  "event.core.mvp": "being round MVP",
-  "event.core.match_win": "winning the match",
-  "event.core.match_lose": "losing the match",
+  "event.kill": "a kill",
+  "event.death": "dying",
+  "event.assist": "an assist",
+  "event.assist_flash": "a flash assist",
+  "event.headshot": "a headshot",
+  "event.suicide": "a suicide",
+  "event.team_kill": "a team kill",
+  "event.team_assist": "a team assist",
+  "event.noscope": "a no-scope",
+  "event.wallbang": "a wallbang",
+  "event.through_smoke": "a kill through smoke",
+  "event.blind_kill": "a blind kill",
+  "event.long_distance": "a long-distance kill",
+  "event.knife_kill": "a knife kill",
+  "event.taser_kill": "a taser kill",
+  "event.grenade_kill": "a grenade kill",
+  "event.inferno_kill": "a fire kill",
+  "event.impact_kill": "an impact kill",
+  "event.bomb_plant": "planting the bomb",
+  "event.bomb_defuse": "defusing the bomb",
+  "event.bomb_defuse_others": "your team defusing the bomb",
+  "event.bomb_exploded": "the bomb exploding",
+  "event.bomb_pickup": "picking up the bomb",
+  "event.bomb_drop": "dropping the bomb",
+  "event.hostage_rescue": "rescuing a hostage",
+  "event.hostage_rescue_all": "all hostages rescued",
+  "event.hostage_hurt": "hurting a hostage",
+  "event.hostage_kill": "killing a hostage",
+  "event.round_win": "winning the round",
+  "event.round_lose": "losing the round",
+  "event.mvp": "being round MVP",
+  "event.match_win": "winning the match",
+  "event.match_lose": "losing the match",
 
-  "event.core.streak_double": "a double kill",
-  "event.core.streak_triple": "a triple kill",
-  "event.core.streak_domination": "a domination",
-  "event.core.streak_rampage": "a rampage",
-  "event.core.streak_mega": "a mega kill",
-  "event.core.streak_ownage": "ownage",
-  "event.core.streak_ultra": "an ultra kill",
-  "event.core.streak_killing_spree": "a killing spree",
-  "event.core.streak_monster": "a monster kill",
-  "event.core.streak_unstoppable": "being unstoppable",
-  "event.core.streak_godlike": "being godlike"
+  "event.streak.double": "a double kill",
+  "event.streak.triple": "a triple kill",
+  "event.streak.domination": "a domination",
+  "event.streak.rampage": "a rampage",
+  "event.streak.mega": "a mega kill",
+  "event.streak.ownage": "ownage",
+  "event.streak.ultra": "an ultra kill",
+  "event.streak.killing_spree": "a killing spree",
+  "event.streak.monster": "a monster kill",
+  "event.streak.unstoppable": "being unstoppable",
+  "event.streak.godlike": "being godlike"
 }

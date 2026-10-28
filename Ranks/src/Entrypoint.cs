@@ -86,6 +86,7 @@ public sealed partial class Ranks : BasePlugin
             _sessions.Start(hotReload);
             Core.Registrator.Register(_scoring);
             _commands.RegisterAll();
+            _scoreboard.Start();
         }
 
         WarnIfNobodyIsScoring();
@@ -104,6 +105,7 @@ public sealed partial class Ranks : BasePlugin
     public override void Unload()
     {
         _commands?.UnregisterAll();
+        _scoreboard?.Dispose();
         _sessions?.Stop();
         _sessions?.FlushOnUnload(UnloadFlushBudget);
         _events?.Clear();

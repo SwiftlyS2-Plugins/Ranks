@@ -9,19 +9,28 @@ using SwiftlyS2.Shared.Players;
 
 namespace Ranks.Scoreboard;
 
-/// <summary>Writes a player's rank onto the scoreboard, on change rather than on a tick.</summary>
+/// <summary>Writes a player's rank onto the scoreboard.</summary>
 /// <remarks>
 /// Every networked write is paired with its notifier. Without it the value changes server-side and
 /// is never networked — the scoreboard keeps rendering the old one, and the bug looks exactly like
 /// a failed points calculation.
+/// <para>
+/// The clan tag and score follow events, but the rank triple is re-asserted every tick: CS2's
+/// scoreboard-refresh loop clears those controller fields between snapshots, so writing them only
+/// on change leaves the icon blank until the next rank change. The change detector in
+/// <see cref="WriteRankIcon"/> compares the live fields, so a steady state costs three reads and
+/// fires no notifier.
+/// </para>
 /// </remarks>
-internal sealed class ScoreboardService
+internal sealed class ScoreboardService : IDisposable
 {
     private readonly ISwiftlyCore _core;
     private readonly ConfigHost<RanksConfig> _config;
     private readonly RankLadder _ladder;
     private readonly PlayerRegistry _registry;
     private readonly ILogger _logger;
+
+    private bool _ticking;
 
     public ScoreboardService(
         ISwiftlyCore core,
@@ -102,6 +111,54 @@ internal sealed class ScoreboardService
                 Apply(player);
     }
 
+    /// <summary>Starts the per-tick rank re-assert. Idempotent.</summary>
+    public void Start()
+    {
+        if (_ticking) return;
+
+        _core.Event.OnTick += ReassertRanks;
+        _ticking = true;
+    }
+
+    public void Dispose()
+    {
+        if (!_ticking) return;
+
+        _core.Event.OnTick -= ReassertRanks;
+        _ticking = false;
+    }
+
+    /// <remarks>
+    /// Deliberately only the rank triple — not the clan tag, and not the score. Score sync has no
+    /// change detector of its own, so running it here would fire ScoreUpdated 64 times a second.
+    /// </remarks>
+    private void ReassertRanks()
+    {
+        var config = _config.Current;
+
+        if (config.Scoreboard.Mode == RankDisplayMode.Off) return;
+
+        foreach (var player in _core.PlayerManager.GetAllPlayers())
+        {
+            if (player.IsFakeClient) continue;
+
+            var record = _registry.BySlot(player.Slot);
+            if (record is null) continue;
+
+            try
+            {
+                if (player.Controller is { IsValid: true } controller)
+                    WriteRankIcon(config, controller, record, record.DisplayOverride?.Points ?? record.Points);
+            }
+            catch
+            {
+                // Swallowed, not logged: with FollowCS2ServerGuidelines on these are protected
+                // fields and every write throws, which at 64 Hz would bury every other line in the
+                // log. Apply() logs the same failure once per real scoreboard change.
+            }
+        }
+    }
+
     private void WriteClanTag(IPlayer player, SwiftlyS2.Shared.SchemaDefinitions.CCSPlayerController controller, string tag)
     {
         if (controller.Clan == tag) return;
@@ -148,16 +205,27 @@ internal sealed class ScoreboardService
 
         var rankType = EngineRankType(mode);
 
-        // Both fields are networked, and a module refreshing per points change makes this run every
-        // kill. Valve's scoreboard delta detection means the notifier IS the replication trigger,
-        // so firing it on an unchanged value is pure cost to every client with the scoreboard open.
-        if (controller.CompetitiveRankType == rankType && controller.CompetitiveRanking == value) return;
+        // CS2 folds the wins count into the icon derivation, so leaving it at whatever the engine
+        // last held collapses every player onto the same displayed rank.
+        var wins = record.MatchWins;
+
+        // All three fields are networked, and a module refreshing per points change makes this run
+        // every kill. Valve's scoreboard delta detection means the notifier IS the replication
+        // trigger, so firing it on an unchanged value is pure cost to every client with the
+        // scoreboard open. Comparing the live fields rather than a cached copy is also what lets
+        // the per-tick pass notice the engine clearing them and re-assert.
+        if (controller.CompetitiveRankType == rankType
+            && controller.CompetitiveRanking == value
+            && controller.CompetitiveWins == wins) return;
 
         controller.CompetitiveRankType = rankType;
         controller.CompetitiveRankTypeUpdated();
 
         controller.CompetitiveRanking = value;
         controller.CompetitiveRankingUpdated();
+
+        controller.CompetitiveWins = wins;
+        controller.CompetitiveWinsUpdated();
     }
 
     /// <summary>The overlay's mode when it names a valid one, else the configured mode.</summary>
@@ -168,7 +236,7 @@ internal sealed class ScoreboardService
     internal static RankDisplayMode ResolveMode(RanksConfig config, RanksDisplayOverride? overlay) =>
         overlay?.RankMode is { Length: > 0 } name && Enum.TryParse<RankDisplayMode>(name, ignoreCase: true, out var mode)
             ? mode
-            : config.Scoreboard.RankMode;
+            : config.Scoreboard.Mode;
 
     private const int MaxSkillGroup = 18;
     private const int MaxDangerZoneIcon = 15;

@@ -27,7 +27,7 @@ internal static class DynamicScaling
     /// <remarks>
     /// Both halves are pinned at 1.0, so a near-equal matchup is a near-no-op and the configured
     /// value applies as written. Any replacement formula must preserve that anchor or the
-    /// configured core.kill and core.death values stop meaning what they say.
+    /// configured kill and death values stop meaning what they say.
     /// </remarks>
     public static double Multiplier(double difference, double min, double max) =>
         difference >= 0

@@ -21,54 +21,54 @@ internal sealed class PointsConfig
 /// <summary>Core's event keys and their shipped values.</summary>
 internal static class PointEvents
 {
-    public const string Kill = "core.kill";
-    public const string Death = "core.death";
-    public const string Assist = "core.assist";
-    public const string AssistFlash = "core.assist_flash";
-    public const string Headshot = "core.headshot";
-    public const string Suicide = "core.suicide";
-    public const string TeamKill = "core.team_kill";
-    public const string TeamAssist = "core.team_assist";
-    public const string NoScope = "core.noscope";
-    public const string Wallbang = "core.wallbang";
-    public const string ThroughSmoke = "core.through_smoke";
-    public const string BlindKill = "core.blind_kill";
-    public const string LongDistance = "core.long_distance";
-    public const string KnifeKill = "core.knife_kill";
-    public const string TaserKill = "core.taser_kill";
-    public const string GrenadeKill = "core.grenade_kill";
-    public const string InfernoKill = "core.inferno_kill";
-    public const string ImpactKill = "core.impact_kill";
-    public const string BombPlant = "core.bomb_plant";
-    public const string BombDefuse = "core.bomb_defuse";
-    public const string BombDefuseOthers = "core.bomb_defuse_others";
-    public const string BombExploded = "core.bomb_exploded";
-    public const string BombPickup = "core.bomb_pickup";
-    public const string BombDrop = "core.bomb_drop";
-    public const string HostageRescue = "core.hostage_rescue";
-    public const string HostageRescueAll = "core.hostage_rescue_all";
-    public const string HostageHurt = "core.hostage_hurt";
-    public const string HostageKill = "core.hostage_kill";
-    public const string RoundWin = "core.round_win";
-    public const string RoundLose = "core.round_lose";
-    public const string Mvp = "core.mvp";
-    public const string MatchWin = "core.match_win";
-    public const string MatchLose = "core.match_lose";
+    public const string Kill = "kill";
+    public const string Death = "death";
+    public const string Assist = "assist";
+    public const string AssistFlash = "assist_flash";
+    public const string Headshot = "headshot";
+    public const string Suicide = "suicide";
+    public const string TeamKill = "team_kill";
+    public const string TeamAssist = "team_assist";
+    public const string NoScope = "noscope";
+    public const string Wallbang = "wallbang";
+    public const string ThroughSmoke = "through_smoke";
+    public const string BlindKill = "blind_kill";
+    public const string LongDistance = "long_distance";
+    public const string KnifeKill = "knife_kill";
+    public const string TaserKill = "taser_kill";
+    public const string GrenadeKill = "grenade_kill";
+    public const string InfernoKill = "inferno_kill";
+    public const string ImpactKill = "impact_kill";
+    public const string BombPlant = "bomb_plant";
+    public const string BombDefuse = "bomb_defuse";
+    public const string BombDefuseOthers = "bomb_defuse_others";
+    public const string BombExploded = "bomb_exploded";
+    public const string BombPickup = "bomb_pickup";
+    public const string BombDrop = "bomb_drop";
+    public const string HostageRescue = "hostage_rescue";
+    public const string HostageRescueAll = "hostage_rescue_all";
+    public const string HostageHurt = "hostage_hurt";
+    public const string HostageKill = "hostage_kill";
+    public const string RoundWin = "round_win";
+    public const string RoundLose = "round_lose";
+    public const string Mvp = "mvp";
+    public const string MatchWin = "match_win";
+    public const string MatchLose = "match_lose";
 
     /// <summary>Killstreak tiers, indexed by kill count from 2 upward; 12+ all pay the last entry.</summary>
     public static readonly (int Kills, string Key)[] Streaks =
     [
-        (2, "core.streak_double"),
-        (3, "core.streak_triple"),
-        (4, "core.streak_domination"),
-        (5, "core.streak_rampage"),
-        (6, "core.streak_mega"),
-        (7, "core.streak_ownage"),
-        (8, "core.streak_ultra"),
-        (9, "core.streak_killing_spree"),
-        (10, "core.streak_monster"),
-        (11, "core.streak_unstoppable"),
-        (12, "core.streak_godlike"),
+        (2, "streak.double"),
+        (3, "streak.triple"),
+        (4, "streak.domination"),
+        (5, "streak.rampage"),
+        (6, "streak.mega"),
+        (7, "streak.ownage"),
+        (8, "streak.ultra"),
+        (9, "streak.killing_spree"),
+        (10, "streak.monster"),
+        (11, "streak.unstoppable"),
+        (12, "streak.godlike"),
     ];
 
     /// <remarks>
@@ -113,16 +113,16 @@ internal static class PointEvents
         [Mvp] = 10,
         [MatchWin] = 15,
         [MatchLose] = -5,
-        ["core.streak_double"] = 5,
-        ["core.streak_triple"] = 6,
-        ["core.streak_domination"] = 7,
-        ["core.streak_rampage"] = 8,
-        ["core.streak_mega"] = 9,
-        ["core.streak_ownage"] = 10,
-        ["core.streak_ultra"] = 11,
-        ["core.streak_killing_spree"] = 12,
-        ["core.streak_monster"] = 13,
-        ["core.streak_unstoppable"] = 14,
-        ["core.streak_godlike"] = 15,
+        ["streak.double"] = 5,
+        ["streak.triple"] = 6,
+        ["streak.domination"] = 7,
+        ["streak.rampage"] = 8,
+        ["streak.mega"] = 9,
+        ["streak.ownage"] = 10,
+        ["streak.ultra"] = 11,
+        ["streak.killing_spree"] = 12,
+        ["streak.monster"] = 13,
+        ["streak.unstoppable"] = 14,
+        ["streak.godlike"] = 15,
     };
 }

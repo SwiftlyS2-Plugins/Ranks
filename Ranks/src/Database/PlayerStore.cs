@@ -30,8 +30,8 @@ internal static class StatColumns
 
     /// <summary>Reads a counter straight off a resident record.</summary>
     /// <remarks>
-    /// Stat keys are plural and point-event keys singular — <c>core.kill</c> is not an error here
-    /// and returns 0 forever, which is the documented behaviour (FR-API-03).
+    /// Stat keys keep the <c>core.</c> prefix that point-event keys dropped, so <c>kill</c> is not
+    /// an error here and returns 0 forever, which is the documented behaviour (FR-API-03).
     /// </remarks>
     public static long Read(PlayerRecord record, string statKey) => statKey.ToLowerInvariant() switch
     {

@@ -50,8 +50,9 @@ public interface IRanksApi
 
     /// <summary>Reads one of core's fixed counters by key, e.g. <c>core.kills</c>.</summary>
     /// <remarks>
-    /// Stat keys are plural, point-event keys singular — <c>core.kill</c> here is not an error and
-    /// returns 0 forever. Read-only by design; core is the single writer.
+    /// Stat keys keep the <c>core.</c> prefix that point-event keys dropped, so the event key
+    /// <c>kill</c> here is not an error and returns 0 forever. Read-only by design; core is the
+    /// single writer.
     /// </remarks>
     long GetStat(ulong steamId, string statKey);
 

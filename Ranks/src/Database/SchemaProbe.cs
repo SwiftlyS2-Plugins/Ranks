@@ -51,6 +51,14 @@ internal sealed class SchemaProbe
 
         if (unusable.Count > 0)
         {
+            // Logged before the summary and only here: on the success path a failed migration is a
+            // footnote, but when a table is missing it is almost always the whole story, and the
+            // summary below can only guess at permissions.
+            if (schemaError is not null)
+                _logger.LogError(
+                    schemaError,
+                    "Ranks: migrations failed, which is why the table(s) below are missing.");
+
             _logger.LogError(
                 "Ranks: {Count} table(s) unusable ({Tables}). The plugin will not record anything. " +
                 "If migrations failed with a permission error, grant CREATE/ALTER on this database, " +
