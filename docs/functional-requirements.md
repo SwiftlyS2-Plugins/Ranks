@@ -1211,9 +1211,14 @@ Per-weapon and per-hitbox tracking.
   `STOMACH`, `LEFTARM`, `RIGHTARM`, `LEFTLEG`, `RIGHTLEG`, `NECK`, `GEAR`,
   `SPECIAL`. **CS2 has no "feet" hitgroup**; the legacy LVL Ranks / ExStats
   column of that name has no engine equivalent and is not reproduced here.
-- Tables: `ranks_weapon_stats`, `ranks_hit_stats`, both affixed via
-  FR-API-06 so they sit alongside the core tables, and both migrated by core
-  against the module's own ledger (FR-DB-05).
+- Tables: `ranks_weapon_stats`, `ranks_hit_stats`, `ranks_weapon_hit_stats`, all
+  affixed via FR-API-06 so they sit alongside the core tables, and all migrated by
+  core against the module's own ledger (FR-DB-05).
+- **Misses are a hitgroup bucket**, `WeaponHitGroups.Miss` (`-1`), stored in both
+  hitgroup tables. A miss has no hitgroup, so it cannot be a column on a table keyed
+  by one; `HitGroup_t` has no negative members, so the value cannot collide and the
+  existing signed `hitgroup` column needed no migration. `ranks_weapon_hit_stats`
+  summed over weapons reproduces `ranks_hit_stats` exactly, miss bucket included.
 - Commands: `!weaponstats` / `!ws`, `!hitstats` / `!hs`, owned by the module —
   core's menu does not list them (FR-CMD-04).
   > **Gap:** `!hitstats` is **not implemented**. The hitgroup counters are

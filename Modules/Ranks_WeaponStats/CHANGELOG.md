@@ -18,8 +18,10 @@ Notable changes to Ranks_WeaponStats, newest first.
 
 First release. Per-weapon and per-hitbox statistics for the Ranks plugin.
 
-- Tracks shots, hits, damage, kills, deaths and headshots per weapon, plus hits and damage
-  per hitgroup.
+- Tracks shots, hits, misses, damage, kills, deaths and headshots per weapon, plus hits
+  and damage per hitgroup — both overall and broken down per weapon.
+- Missed shots are counted as a hitgroup bucket, so the breakdown accounts for every
+  trigger pull rather than only the ones that landed.
 - `!weaponstats` (alias `!ws`) and the hitgroup breakdown.
 - Bot involvement is counted only when `CountAgainstBots` / `CountFromBots` are enabled,
   matching core's `PointsForBots` default of off.

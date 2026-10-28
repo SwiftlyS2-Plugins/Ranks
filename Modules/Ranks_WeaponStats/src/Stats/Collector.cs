@@ -137,10 +137,10 @@ internal sealed class Collector
         // data at all. The weapon row for the same event is still recorded above.
         var hitGroup = (int)e.ActualHitGroup;
 
-        if ((uint)hitGroup < SessionStats.HitGroupSlots)
+        if ((uint)hitGroup < WeaponCounters.HitGroupSlots)
         {
-            stats.HitGroupHits[hitGroup]++;
-            stats.HitGroupDamage[hitGroup] += damage;
+            counters.HitGroupHits[hitGroup]++;
+            counters.HitGroupDamage[hitGroup] += damage;
         }
 
         return HookResult.Continue;

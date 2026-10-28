@@ -223,14 +223,21 @@ these four members plus a flush signal are enough, the database half of
 
 ## 4. Tables
 
-`ranks_weapon_stats` and `ranks_hit_stats`, both affixed via FR-API-06 so they
-sit alongside core's, both migrated by core against this module's ledger
-(FR-DB-05).
+`ranks_weapon_stats`, `ranks_hit_stats` and `ranks_weapon_hit_stats`, all affixed
+via FR-API-06 so they sit alongside core's, all migrated by core against this
+module's ledger (FR-DB-05).
 
-**Each needs a real PK on its natural key** — `(steam_id, weapon)` and
-`(steam_id, hitgroup)`. Without one, MySQL's `ON DUPLICATE KEY UPDATE` silently
-inserts duplicates forever while PostgreSQL and SQLite reject the statement
-outright.
+**Each needs a real PK on its natural key** — `(steam_id, weapon)`,
+`(steam_id, hitgroup)` and `(steam_id, weapon, hitgroup)`. Without one, MySQL's
+`ON DUPLICATE KEY UPDATE` silently inserts duplicates forever while PostgreSQL and
+SQLite reject the statement outright.
+
+**Misses ride the hitgroup axis as `-1`.** A miss has no hitgroup, so it cannot be a
+column on a table keyed by one, and `HitGroup_t` has no negative members for it to
+collide with — which also meant the existing signed `hitgroup` column needed no
+migration. Summing `ranks_weapon_hit_stats` over weapons reproduces `ranks_hit_stats`
+exactly, miss bucket included, because both are written from the same per-weapon
+counters in one flush.
 
 Weapon is stored as a name rather than a defindex: the events give a name, and
 resolving it to a defindex would add a lookup that earns nothing.
@@ -254,8 +261,9 @@ module registers them at runtime through `Core.Command.RegisterCommand` rather
 than by attribute.
 
 **Hitgroup totals have no command.** They are collected, stored in
-`ranks_hit_stats` and exposed through `IWeaponStatsApi.GetHitGroupsAsync`, but
-nothing prints them in chat — `StatsCommands.RegisterAll` registers only the
+`ranks_hit_stats` and `ranks_weapon_hit_stats`, and exposed through
+`IWeaponStatsApi.GetHitGroupsAsync` and `GetWeaponHitGroupsAsync`, but nothing
+prints them in chat — `StatsCommands.RegisterAll` registers only the
 `WeaponStats` key.
 
 ---

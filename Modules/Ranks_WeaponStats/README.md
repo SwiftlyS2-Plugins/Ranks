@@ -7,7 +7,8 @@ Per-weapon and per-hitbox statistics for the [Ranks](../../README.md) plugin.
 ## Features
 
 - 🔫 **Per-weapon totals** - shots, hits, damage, kills, deaths and headshots for every gun
-- 🎯 **Hitbox breakdown** - where your bullets actually land, by hitgroup
+- 🎯 **Hitbox breakdown** - where your bullets actually land, by hitgroup and per weapon
+- ✖️ **Misses counted as a bucket** - the distribution covers every trigger pull, not just the ones that landed
 - 📊 **In-game command** - `!weaponstats`, configurable name and permission
 - 🤖 **Bot and friendly-fire switches** - count them or not, per game mode
 - 🔌 **Published API** - other plugins read the same totals
@@ -208,9 +209,17 @@ public interface IWeaponStatsApi
 
     Task<IReadOnlyList<WeaponStatRow>> GetWeaponsAsync(ulong steamId);
     Task<IReadOnlyList<HitGroupStatRow>> GetHitGroupsAsync(ulong steamId);
+    Task<IReadOnlyList<WeaponHitGroupStatRow>> GetWeaponHitGroupsAsync(ulong steamId);
     Task<WeaponStatRow?> GetWeaponAsync(ulong steamId, string weapon);
 }
 ```
+
+`GetWeaponHitGroupsAsync` is the same distribution split by weapon — summing its rows
+over weapons reproduces `GetHitGroupsAsync` exactly.
+
+**Misses are a hitgroup bucket**, `WeaponHitGroups.Miss` (`-1`), present in both. A miss
+has no hitgroup, so it cannot be a column on a table keyed by one; `HitGroup_t` has no
+negative members, so the value cannot collide. `Damage` on a miss row is always `0`.
 
 `Weapon` is the entity designer name (`weapon_ak47`, not `ak47`); `GetWeaponAsync`
 normalises either spelling. `HitGroup` is the raw `HitGroup_t` value, which is not a

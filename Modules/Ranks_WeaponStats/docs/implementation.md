@@ -228,8 +228,13 @@ Qualify with the table name on the PostgreSQL branch (`{t}.shots`, not `shots`)
 or the reference is ambiguous against `EXCLUDED`.
 
 **`ranks_hit_stats` takes the identical shape**, keyed `(steam_id, hitgroup)`
-with `hits` and `damage` accumulating the same way. It is a second statement,
-not a special case.
+with `hits` and `damage` accumulating the same way, and `ranks_weapon_hit_stats`
+again keyed `(steam_id, weapon, hitgroup)`. They are further statements, not
+special cases.
+
+All three are written from the same per-weapon counters inside one transaction,
+which is what makes `ranks_weapon_hit_stats` summed over weapons equal
+`ranks_hit_stats` rather than two code paths counting the same events.
 
 Table names come from `ResolveTableName` at query-build time, never string
 concatenation.

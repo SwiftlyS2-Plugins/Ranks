@@ -150,7 +150,7 @@ internal sealed class WeaponStatsModule : RanksModuleBase
     /// </remarks>
     protected override void OnCoreReady()
     {
-        _writer.Configure(ConnectionName, Table("ranks_weapon_stats"), Table("ranks_hit_stats"));
+        _writer.Configure(ConnectionName, Table("ranks_weapon_stats"), Table("ranks_hit_stats"), Table("ranks_weapon_hit_stats"));
         _onCoreReady();
     }
 

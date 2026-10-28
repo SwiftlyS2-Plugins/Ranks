@@ -75,6 +75,27 @@ internal sealed class WeaponStatsApi : IWeaponStatsApi
         return [.. merged.Values];
     }
 
+    public async Task<IReadOnlyList<WeaponHitGroupStatRow>> GetWeaponHitGroupsAsync(ulong steamId)
+    {
+        var live = await PeekAsync(steamId);
+        var stored = await _writer.ReadWeaponHitGroupsAsync(steamId);
+
+        var merged = new Dictionary<(string Weapon, short HitGroup), WeaponHitGroupStatRow>();
+
+        foreach (var (weapon, hitGroup, hits, damage) in stored)
+            merged[(weapon, hitGroup)] = new WeaponHitGroupStatRow(weapon, hitGroup, hits, damage);
+
+        foreach (var (weapon, hitGroup, hits, damage) in live?.WeaponHitGroups ?? [])
+        {
+            var key = (weapon, hitGroup);
+            var row = merged.GetValueOrDefault(key) ?? new WeaponHitGroupStatRow(weapon, hitGroup, 0, 0);
+
+            merged[key] = row with { Hits = row.Hits + hits, Damage = row.Damage + damage };
+        }
+
+        return [.. merged.Values];
+    }
+
     public async Task<WeaponStatRow?> GetWeaponAsync(ulong steamId, string weapon)
     {
         // Normalised so a caller passing "ak47" finds the row stored as "weapon_ak47"; the two

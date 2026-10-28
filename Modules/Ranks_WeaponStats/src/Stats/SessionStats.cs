@@ -1,8 +1,17 @@
+using Ranks.WeaponStats.Contract;
+
 namespace Ranks.WeaponStats.Stats;
 
 /// <summary>Per-weapon counters for one session.</summary>
 internal sealed class WeaponCounters
 {
+    /// <remarks>
+    /// Twelve, not eleven. HitGroup_t runs GENERIC = 0 through SPECIAL = 11 with a hole at
+    /// UNUSED = 9, so indexing by the raw enum value needs 12 slots — an 11-element array
+    /// overflows on SPECIAL. Slot 9 stays zero forever and is skipped at flush time.
+    /// </remarks>
+    public const int HitGroupSlots = 12;
+
     public long Shots;
     public long Hits;
     public long Misses;
@@ -10,6 +19,14 @@ internal sealed class WeaponCounters
     public long Kills;
     public long Deaths;
     public long Headshots;
+
+    /// <remarks>
+    /// Per weapon rather than per player so a single gun's distribution is answerable; the player
+    /// total is the sum across weapons, which is why it is no longer tracked separately.
+    /// </remarks>
+    public long[] HitGroupHits { get; } = new long[HitGroupSlots];
+
+    public long[] HitGroupDamage { get; } = new long[HitGroupSlots];
 
     /// <summary>A fired shot that has not yet been seen to damage anyone.</summary>
     /// <remarks>
@@ -19,6 +36,10 @@ internal sealed class WeaponCounters
     /// </remarks>
     public bool PendingShot;
 
+    /// <remarks>
+    /// The hitgroup arrays are not consulted: a hitgroup slot only ever moves alongside
+    /// <see cref="Hits"/>, so a weapon with an empty scalar set has an empty distribution too.
+    /// </remarks>
     public bool IsEmpty => (Shots | Hits | Misses | Damage | Kills | Deaths | Headshots) == 0;
 
     /// <summary>Banks an unresolved shot as a miss.</summary>
@@ -38,20 +59,9 @@ internal sealed class WeaponCounters
 /// </remarks>
 internal sealed class SessionStats
 {
-    /// <remarks>
-    /// Twelve, not eleven. HitGroup_t runs GENERIC = 0 through SPECIAL = 11 with a hole at
-    /// UNUSED = 9, so indexing by the raw enum value needs 12 slots — an 11-element array
-    /// overflows on SPECIAL. Slot 9 stays zero forever and is skipped at flush time.
-    /// </remarks>
-    public const int HitGroupSlots = 12;
-
     public required ulong SteamId { get; init; }
 
     public Dictionary<string, WeaponCounters> Weapons { get; } = new(StringComparer.Ordinal);
-
-    public long[] HitGroupHits { get; } = new long[HitGroupSlots];
-
-    public long[] HitGroupDamage { get; } = new long[HitGroupSlots];
 
     public WeaponCounters For(string weapon)
     {
@@ -83,6 +93,11 @@ internal sealed class SessionStats
     private StatsDelta? Capture(bool reset)
     {
         var weapons = new List<(string Weapon, WeaponCounters Counters)>();
+        var weaponHitGroups = new List<(string Weapon, short HitGroup, long Hits, long Damage)>();
+
+        var rolledHits = new long[WeaponCounters.HitGroupSlots];
+        var rolledDamage = new long[WeaponCounters.HitGroupSlots];
+        var rolledMisses = 0L;
 
         foreach (var (weapon, counters) in Weapons)
         {
@@ -93,7 +108,7 @@ internal sealed class SessionStats
 
             if (counters.IsEmpty) continue;
 
-            weapons.Add((weapon, new WeaponCounters
+            var copy = new WeaponCounters
             {
                 Shots = counters.Shots,
                 Hits = counters.Hits,
@@ -102,7 +117,33 @@ internal sealed class SessionStats
                 Kills = counters.Kills,
                 Deaths = counters.Deaths,
                 Headshots = counters.Headshots,
-            }));
+            };
+
+            for (short slot = 0; slot < WeaponCounters.HitGroupSlots; slot++)
+            {
+                var hits = counters.HitGroupHits[slot];
+                var damage = counters.HitGroupDamage[slot];
+
+                if (hits == 0 && damage == 0) continue;
+
+                copy.HitGroupHits[slot] = hits;
+                copy.HitGroupDamage[slot] = damage;
+
+                weaponHitGroups.Add((weapon, slot, hits, damage));
+
+                rolledHits[slot] += hits;
+                rolledDamage[slot] += damage;
+            }
+
+            // The miss bucket rides the same table as the landed hitgroups, so the distribution
+            // accounts for every trigger pull rather than only the ones that connected.
+            if (counters.Misses > 0)
+            {
+                weaponHitGroups.Add((weapon, WeaponHitGroups.Miss, counters.Misses, 0));
+                rolledMisses += counters.Misses;
+            }
+
+            weapons.Add((weapon, copy));
 
             if (!reset) continue;
 
@@ -113,28 +154,33 @@ internal sealed class SessionStats
             counters.Kills = 0;
             counters.Deaths = 0;
             counters.Headshots = 0;
+
+            Array.Clear(counters.HitGroupHits);
+            Array.Clear(counters.HitGroupDamage);
         }
 
         var hitGroups = new List<(short HitGroup, long Hits, long Damage)>();
 
-        for (short i = 0; i < HitGroupSlots; i++)
+        for (short slot = 0; slot < WeaponCounters.HitGroupSlots; slot++)
         {
-            if (HitGroupHits[i] == 0 && HitGroupDamage[i] == 0) continue;
+            if (rolledHits[slot] == 0 && rolledDamage[slot] == 0) continue;
 
-            hitGroups.Add((i, HitGroupHits[i], HitGroupDamage[i]));
-
-            if (!reset) continue;
-
-            HitGroupHits[i] = 0;
-            HitGroupDamage[i] = 0;
+            hitGroups.Add((slot, rolledHits[slot], rolledDamage[slot]));
         }
 
-        return weapons.Count == 0 && hitGroups.Count == 0 ? null : new StatsDelta(SteamId, weapons, hitGroups);
+        if (rolledMisses > 0) hitGroups.Add((WeaponHitGroups.Miss, rolledMisses, 0));
+
+        return weapons.Count == 0 ? null : new StatsDelta(SteamId, weapons, hitGroups, weaponHitGroups);
     }
 }
 
 /// <summary>A detached batch, safe to hand to the writer.</summary>
+/// <remarks>
+/// <paramref name="HitGroups"/> is the per-weapon breakdown rolled up, so the two agree by
+/// construction rather than by two code paths counting the same events.
+/// </remarks>
 internal sealed record StatsDelta(
     ulong SteamId,
     IReadOnlyList<(string Weapon, WeaponCounters Counters)> Weapons,
-    IReadOnlyList<(short HitGroup, long Hits, long Damage)> HitGroups);
+    IReadOnlyList<(short HitGroup, long Hits, long Damage)> HitGroups,
+    IReadOnlyList<(string Weapon, short HitGroup, long Hits, long Damage)> WeaponHitGroups);

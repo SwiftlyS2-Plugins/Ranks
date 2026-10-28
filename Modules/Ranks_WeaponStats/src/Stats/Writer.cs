@@ -20,6 +20,7 @@ internal sealed class Writer
     private string _connectionName = "default";
     private string _weaponTable = "ranks_weapon_stats";
     private string _hitTable = "ranks_hit_stats";
+    private string _weaponHitTable = "ranks_weapon_hit_stats";
     private bool _mysql;
 
     public Writer(ISwiftlyCore core, ILogger logger)
@@ -31,11 +32,12 @@ internal sealed class Writer
     public bool IsReady { get; private set; }
 
     /// <summary>Binds the names core resolved. Until this runs the writer refuses to write.</summary>
-    public void Configure(string connectionName, string weaponTable, string hitTable)
+    public void Configure(string connectionName, string weaponTable, string hitTable, string weaponHitTable)
     {
         _connectionName = connectionName;
         _weaponTable = weaponTable;
         _hitTable = hitTable;
+        _weaponHitTable = weaponHitTable;
         _mysql = _core.Database.GetConnectionInfo(connectionName).Driver?.Trim().ToLowerInvariant() is "mysql" or "mariadb";
         IsReady = true;
     }
@@ -87,6 +89,9 @@ internal sealed class Writer
 
             foreach (var (hitGroup, hits, damage) in delta.HitGroups)
                 WriteHitGroup(connection, transaction, delta.SteamId, hitGroup, hits, damage);
+
+            foreach (var (weapon, hitGroup, hits, damage) in delta.WeaponHitGroups)
+                WriteWeaponHitGroup(connection, transaction, delta.SteamId, weapon, hitGroup, hits, damage);
         }
 
         transaction.Commit();
@@ -163,6 +168,33 @@ internal sealed class Writer
         command.ExecuteNonQuery();
     }
 
+    private void WriteWeaponHitGroup(IDbConnection connection, IDbTransaction transaction, ulong steamId, string weapon, short hitGroup, long hits, long damage)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = _mysql
+            ? $"""
+               INSERT INTO {_weaponHitTable} (steam_id, weapon, hitgroup, hits, damage)
+               VALUES (@steam_id, @weapon, @hitgroup, @hits, @damage)
+               ON DUPLICATE KEY UPDATE hits = hits + VALUES(hits), damage = damage + VALUES(damage)
+               """
+            : $"""
+               INSERT INTO {_weaponHitTable} (steam_id, weapon, hitgroup, hits, damage)
+               VALUES (@steam_id, @weapon, @hitgroup, @hits, @damage)
+               ON CONFLICT (steam_id, weapon, hitgroup) DO UPDATE SET
+                   hits = {_weaponHitTable}.hits + EXCLUDED.hits,
+                   damage = {_weaponHitTable}.damage + EXCLUDED.damage
+               """;
+
+        Add(command, "@steam_id", (long)steamId);
+        Add(command, "@weapon", weapon);
+        Add(command, "@hitgroup", hitGroup);
+        Add(command, "@hits", hits);
+        Add(command, "@damage", damage);
+
+        command.ExecuteNonQuery();
+    }
+
     /// <summary>Deletes both tables' rows for purged players.</summary>
     /// <remarks>
     /// <c>PlayersPurged</c> is the only notice this module will ever get — module tables are keyed
@@ -182,7 +214,7 @@ internal sealed class Writer
                 connection.Open();
                 using var transaction = connection.BeginTransaction();
 
-                foreach (var table in (ReadOnlySpan<string>)[_weaponTable, _hitTable])
+                foreach (var table in (ReadOnlySpan<string>)[_weaponTable, _hitTable, _weaponHitTable])
                     foreach (var steamId in ids)
                     {
                         using var command = connection.CreateCommand();
@@ -221,7 +253,7 @@ internal sealed class Writer
 
                 var removed = 0;
 
-                foreach (var table in (ReadOnlySpan<string>)[_weaponTable, _hitTable])
+                foreach (var table in (ReadOnlySpan<string>)[_weaponTable, _hitTable, _weaponHitTable])
                 {
                     using var command = connection.CreateCommand();
                     command.CommandText = $"DELETE FROM {table} WHERE steam_id NOT IN (SELECT steam_id FROM {playersTable})";
@@ -287,6 +319,30 @@ internal sealed class Writer
             using var reader = command.ExecuteReader();
             while (reader.Read())
                 rows.Add((reader.GetInt16(0), reader.GetInt64(1), reader.GetInt64(2)));
+
+            return rows;
+        });
+    }
+
+    /// <summary>Every stored per-weapon hitgroup row for a player. Off-thread.</summary>
+    public Task<List<(string Weapon, short HitGroup, long Hits, long Damage)>> ReadWeaponHitGroupsAsync(ulong steamId)
+    {
+        if (!IsReady) return Task.FromResult(new List<(string, short, long, long)>());
+
+        return Task.Run(() =>
+        {
+            var rows = new List<(string, short, long, long)>();
+
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT weapon, hitgroup, hits, damage FROM {_weaponHitTable} WHERE steam_id = @steam_id";
+            Add(command, "@steam_id", (long)steamId);
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+                rows.Add((reader.GetString(0), reader.GetInt16(1), reader.GetInt64(2), reader.GetInt64(3)));
 
             return rows;
         });
