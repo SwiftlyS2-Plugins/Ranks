@@ -73,15 +73,15 @@ internal sealed class AwardPipeline
         var config = _config.Current;
 
         return ShouldRecordDeath(
-            config.Rank.WarmupPoints, IsWarmup(), config.Rank.PointsForBots, victimIsBot, attackerIsBot);
+            config.Rank.WarmupPoints, IsWarmup(), config.Rank.BotsEnabled, victimIsBot, attackerIsBot);
     }
 
     /// <remarks>Split from the live state so the warmup / bot truth table reads as one expression.</remarks>
     internal static bool ShouldRecordDeath(
-        bool warmupPoints, bool isWarmup, bool pointsForBots, bool victimIsBot, bool attackerIsBot)
+        bool warmupPoints, bool isWarmup, bool botsEnabled, bool victimIsBot, bool attackerIsBot)
     {
         if (!warmupPoints && isWarmup) return false;
-        if (!pointsForBots && (victimIsBot || attackerIsBot)) return false;
+        if (!botsEnabled && (victimIsBot || attackerIsBot)) return false;
 
         return true;
     }
@@ -260,7 +260,7 @@ internal sealed class AwardPipeline
         // its SteamID is never a resident record and "not in the registry" cannot tell a bot apart
         // from an event that simply has no counterparty. This gate decides whether a human earns
         // from a bot, never whether the bot itself is tracked.
-        if (!config.Rank.PointsForBots && counterpartyIsBot) return false;
+        if (!config.Rank.BotsEnabled && counterpartyIsBot) return false;
 
         return true;
     }

@@ -77,7 +77,7 @@ internal sealed class RanksBridge
     {
         if (_api is not IRanksApi api || _arbiter is not ComboArbiter arbiter) return;
 
-        arbiter.UpdatePointsForBots(api.GetPointSettings().PointsForBots);
+        arbiter.UpdateBotsEnabled(api.GetPointSettings().BotsEnabled);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -223,7 +223,7 @@ internal sealed class ComboArbiter : IRanksKillArbiter
 
     /// <remarks>Refreshed on the flush timer rather than read per kill: <c>GetPointSettings</c>
     /// builds a record and a dictionary, and this runs inside core's award path.</remarks>
-    public void UpdatePointsForBots(bool countBots) => _countBots = countBots;
+    public void UpdateBotsEnabled(bool botsEnabled) => _countBots = botsEnabled;
 
     public void ResetRound() => _firstBloodTaken = false;
 

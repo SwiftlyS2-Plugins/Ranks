@@ -45,7 +45,7 @@ internal sealed class MatchTracker
     /// <summary>Starts tracking a player. Bots deliberately never get a session.</summary>
     /// <remarks>
     /// A bot therefore never owns a rating row — it has no SteamID64 to key one to. Whether bots
-    /// may be imputed into a team average is a separate question, answered by core's PointsForBots.
+    /// may be imputed into a team average is a separate question, answered by core's BotsEnabled.
     /// </remarks>
     public void Adopt(IPlayer player)
     {
@@ -334,16 +334,16 @@ internal sealed class MatchTracker
             return false;
         }
 
-        // With PointsForBots off, a side carried entirely by bots is not a side anyone was rated
+        // With BotsEnabled off, a side carried entirely by bots is not a side anyone was rated
         // against, so the whole match is unrated rather than half of it.
-        if (!settings.PointsForBots)
+        if (!settings.BotsEnabled)
         {
             var onT = _sessions.Values.Any(s => s.RoundsPresent > 0 && s.LastTeam == TeamT);
             var onCt = _sessions.Values.Any(s => s.RoundsPresent > 0 && s.LastTeam == TeamCt);
 
             if (!onT || !onCt)
             {
-                reason = "one side had no rated humans and core's Rank.PointsForBots is false";
+                reason = "one side had no rated humans and core's Rank.BotsEnabled is false";
                 return false;
             }
         }

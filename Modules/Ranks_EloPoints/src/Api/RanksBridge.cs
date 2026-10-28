@@ -159,7 +159,7 @@ internal sealed class RanksBridge
             settings.MinPoints,
             settings.MinPlayers,
             settings.WarmupPoints,
-            settings.PointsForBots);
+            settings.BotsEnabled);
     }
 
     /// <summary>The core table name, resolved with the operator's affixes.</summary>

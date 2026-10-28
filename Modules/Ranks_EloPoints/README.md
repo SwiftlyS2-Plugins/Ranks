@@ -118,7 +118,7 @@ than making the operator set the same thing twice:
 | `Rank.MinPoints` | the floor a rating cannot fall below |
 | `Rank.MinPlayers` | the minimum humans for a match to be rated at all |
 | `Rank.WarmupPoints` | whether warmup rounds count |
-| `Rank.PointsForBots` | whether a team with no rated humans can be rated |
+| `Rank.BotsEnabled` | whether a team with no rated humans can be rated |
 
 Core applies none of these itself with `UseCoreRankingLogic` off. They are still the
 operator's stated intent, and this module honours them.

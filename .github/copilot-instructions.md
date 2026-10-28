@@ -1485,7 +1485,7 @@ if (hotReload)
 }
 ```
 
-Bots are excluded from scoring by `Rank.PointsForBots`, but note that a bot has
+Bots are excluded from scoring by `Rank.BotsEnabled`, but note that a bot has
 no meaningful SteamID — never create a record for one.
 
 ---
@@ -1600,7 +1600,7 @@ change could have affected.
 | Area | Invariant | Why it is silent |
 |---|---|---|
 | `TableNames` | The plugin supplies the separator, not the operator. Empty affixes change nothing. A module ledger drops the `ranks` prefix. Overlong identifiers fold deterministically | A wrong affix writes to a real table that is simply the wrong one, and a ledger collision reports migrations as applied that never ran |
-| `AwardPipeline.ShouldRecordDeath` | The warmup / bot gate is a five-input truth table: warmup deaths drop when `WarmupPoints` is off, bot deaths when `PointsForBots` is off | Scoring just runs slightly wrong, forever |
+| `AwardPipeline.ShouldRecordDeath` | The warmup / bot gate is a five-input truth table: warmup deaths drop when `WarmupPoints` is off, bot deaths when `BotsEnabled` is off | Scoring just runs slightly wrong, forever |
 | Scoring anchors | Equal players score the configured value; the difference is bounded and symmetric; the ladder picks the highest threshold met | A broken anchor makes every configured `kill` value mean something other than what it says |
 | `ScoreboardService.EngineRankType` | Every visible mode maps to a **confirmed** engine rank type. `0` is the engine's "no rank" | CS2 renders nothing for an unrecognised `m_iCompetitiveRankType` and reports no error, so it looks like the feature is switched off. It shipped broken once, writing `(byte)mode` |
 | `ScoreboardService.ResolveMode` | An unparseable or undefined mode falls back to the configured mode, never to `Off`. `Enum.TryParse` accepts numbers, so `Enum.IsDefined` is required | A module typo would otherwise blank every scoreboard on the server |

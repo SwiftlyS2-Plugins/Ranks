@@ -67,10 +67,12 @@ public sealed class RankOptions
     public bool WarmupPoints { get; set; } = false;
 
     /// <remarks>
-    /// <c>false</c> discards any death involving a bot, on the same terms as warmup: a bot is not
-    /// a player, so a kill on one is not a fact about play (FR-PTS-03).
+    /// <c>false</c> discards any interaction involving a bot — points, counters, killstreak and
+    /// arbiter claims alike, on the same terms as warmup: a bot is not a player, so a kill on one
+    /// is not a fact about play (FR-PTS-03). Modules read this through the API rather than
+    /// carrying their own switch, so one flip covers the whole plugin set.
     /// </remarks>
-    public bool PointsForBots { get; set; } = false;
+    public bool BotsEnabled { get; set; } = false;
 
     public bool FfaMode { get; set; } = false;
 }

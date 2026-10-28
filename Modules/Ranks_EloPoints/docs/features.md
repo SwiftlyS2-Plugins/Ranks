@@ -249,7 +249,7 @@ An all-bot team falls back to the mean of every rated player in the match, and
 then to `Rank.StartPoints` if there are none.
 
 Whether a team with **no rated humans at all** can be rated is core's
-`Rank.PointsForBots`:
+`Rank.BotsEnabled`:
 
 - `false` — the match is unrated for everyone. Nothing is written.
 - `true` — impute and rate normally.
@@ -265,7 +265,7 @@ operator has already stated whether bots count.
 |---|---|---|
 | Current rating / write rating | `GetPoints`, `SetPoints` | exists (FR-API-02) |
 | Per-match performance inputs | `GetSnapshot` | exists (FR-API-02) |
-| Operator intent (`StartPoints`, `MinPoints`, `MinPlayers`, `WarmupPoints`, `PointsForBots`) | `GetPointSettings` | exists (FR-API-05) |
+| Operator intent (`StartPoints`, `MinPoints`, `MinPlayers`, `WarmupPoints`, `BotsEnabled`) | `GetPointSettings` | exists (FR-API-05) |
 | Adopt a mid-match joiner | `PlayerDataLoaded` | exists (FR-API-04) |
 | Shared connection, affixed names, schema | `ConnectionName`, `ResolveTableName`, `RegisterMigrations` | exists (FR-API-06) |
 | Durability at match end | `SavePlayerAsync`, `SaveAllAsync` | exists (FR-API-09) |

@@ -21,8 +21,8 @@ First release. Per-weapon and per-hitbox statistics for the Ranks plugin.
 - Tracks shots, hits, misses, damage, kills, deaths and headshots per weapon, plus hits
   and damage per hitgroup — both overall and broken down per weapon.
 - `!weaponstats` (alias `!ws`) and the hitgroup breakdown.
-- Bot involvement is counted only when `CountAgainstBots` / `CountFromBots` are enabled,
-  matching core's `PointsForBots` default of off.
+- Bot interactions are counted only when core's `Rank.BotsEnabled` is on — this module has
+  no bot switch of its own, so the two can never be configured into disagreeing.
 - Figures include the caller's unflushed session delta, so a reading never lags a flush
   interval behind.
 - Published `Ranks.WeaponStats.Api.v1` for other plugins to read the same totals.

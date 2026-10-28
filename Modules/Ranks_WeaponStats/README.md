@@ -61,8 +61,6 @@ Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `Tracking.CountFriendlyFire` | bool | `false` | Count hits, damage, hitgroups and kills against players on your own team |
-| `Tracking.CountAgainstBots` | bool | `false` | Count hits, damage, kills, headshots and hitgroups when the **victim** is a bot |
-| `Tracking.CountFromBots` | bool | `false` | Count deaths when the **killer** is a bot |
 | `Database.FlushIntervalSeconds` | int | `120` | How often counters are written; `0` flushes only on disconnect, map change and unload |
 | `Display.TopWeapons` | int | `10` | Rows in the `!weaponstats` list |
 | `Display.MinShotsToList` | int | `10` | Hides weapons barely touched, so one stray pistol shot does not fill the table |
@@ -77,9 +75,7 @@ Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
 {
   "WeaponStats": {
     "Tracking": {
-      "CountFriendlyFire": false,
-      "CountAgainstBots": false,
-      "CountFromBots": false
+      "CountFriendlyFire": false
     },
     "Database": {
       "FlushIntervalSeconds": 120
@@ -129,14 +125,15 @@ the same way.
 **Self damage is never counted** under any mode, and **deaths are never filtered by
 this switch**: being killed by a teammate is still a death.
 
-### The two bot switches
+### Bots are core's switch, not this module's
 
-Independent on purpose — set either, both or neither. The usual reason to split them
-is a practice server where bot kills are padding but deaths to bots still matter.
+This module has **no bot setting**. It reads core's `Rank.BotsEnabled` through the API,
+so one flip covers core, this module and every other one — and the totals cannot be
+configured into disagreeing.
 
-**Both default to `false`, matching core's `Rank.PointsForBots`.** At the shipped
-defaults this module's bot handling matches core's, so on a server without warmup the
-totals reconcile:
+With it off (the default) an interaction is dropped whenever the counterparty is a bot:
+hits, damage, hitgroups, kills and headshots against one, and deaths caused by one.
+At the shipped defaults, on a server without warmup, the totals reconcile:
 
 ```
 SUM(ranks_weapon_stats.kills) per player  ==  ranks_players.kills
@@ -144,27 +141,21 @@ SUM(ranks_weapon_stats.hits)  per player  ==  ranks_players.hits
 ```
 
 Core keeps its own overall `hits`, `misses` and `headshots` on the player row, counted
-from the same events but gated by **core's** settings. The two agree only while the
-switches here match core's, exactly as for kills.
-
-Setting either switch independently of core's breaks that, and `!weaponstats` will
-disagree with `!stats`. That is an operator choice rather than a bug — but worth
-knowing before the first player reports it.
+from the same events and now gated by the same switch.
 
 > [!NOTE]
-> **Warmup is a second, unavoidable source of divergence.** Core drops warmup deaths
-> entirely when its `Rank.WarmupPoints` is off; this module has no warmup switch and
-> records them, so its totals run ahead on any server with warmup enabled. There is no
-> setting that reconciles the two today.
+> **Warmup is the remaining source of divergence.** Core drops warmup deaths entirely
+> when its `Rank.WarmupPoints` is off; this module has no warmup switch and records
+> them, so its totals run ahead on any server with warmup enabled. There is no setting
+> that reconciles the two today.
 
 > [!WARNING]
-> **`CountAgainstBots = false` makes accuracy read low.** Shots come from
-> `weapon_fire`, which has no victim and therefore cannot be filtered — shots at bots
-> count while the resulting hits do not. Nothing can fix this; the event carries no
-> target. Turn both switches **on** (alongside core's `PointsForBots`) if you run
-> bots and care about accuracy.
+> **`BotsEnabled = false` makes accuracy read low.** Shots come from `weapon_fire`,
+> which has no victim and therefore cannot be filtered — shots at bots count while the
+> resulting hits do not. Nothing can fix this; the event carries no target. Turn
+> `Rank.BotsEnabled` **on** if you run bots and care about accuracy.
 
-Neither switch affects bots' *own* rows: a bot never gets stats of its own, because
+The switch does not affect bots' *own* rows: a bot never gets stats of its own, because
 it has no SteamID64 to key them to.
 
 ---
@@ -236,8 +227,8 @@ dense range — `0` through `11` with a hole at `9`.
 |---------|----------------|----------|
 | "this module is idle" at startup | Ranks is not installed | Install Ranks alongside it |
 | Almost nothing is recorded | FFA server with `CountFriendlyFire` off | Set it `true`, and core's `Rank.FfaMode` to match |
-| Accuracy looks far too low | Bots on the server with `CountAgainstBots` off | Turn both bot switches on, with core's `PointsForBots` |
-| `!weaponstats` disagrees with `!stats` | Bot switches differ from core's `PointsForBots` | Set all three the same way |
+| Accuracy looks far too low | Bots on the server with core's `Rank.BotsEnabled` off | Turn `Rank.BotsEnabled` on |
+| `!weaponstats` disagrees with `!stats` | Warmup rounds, which core drops and this module keeps | Expected; see the note under the bot switch |
 | Stats lost after a crash | Flush interval too long | Lower `Database.FlushIntervalSeconds` |
 | No tables created | Core could not reach the database | Check core's connection name and the startup log |
 | `!hitstats` does nothing | It does not exist | Hitgroup totals are API-only; see the note under Commands |

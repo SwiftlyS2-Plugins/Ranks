@@ -65,7 +65,7 @@ leaderboard farmable.
 **Counters are raw event counts, and the scoring gates that reach them are the bot
 and warmup ones.** That is core's rule, not this module inventing a policy: per
 FR-PTS-03 `MinPlayers` and FFA suppress the award and never the stat, while
-`PointsForBots` and `WarmupPoints` discard the death event outright — a bot is not a
+`BotsEnabled` and `WarmupPoints` discard the death event outright — a bot is not a
 player and a warmup round is not the match, so neither is a fact about play.
 
 The payoff is a **reconciliation invariant** worth testing against:
@@ -77,9 +77,9 @@ SUM(ranks_weapon_stats.deaths) WHERE steam_id = X  ==  ranks_players.deaths for 
 
 **It holds at the shipped defaults on a server without warmup**, because both sides
 then count the same events under the same rules — team kills excluded on both (§1.1),
-bot interactions excluded on both (`CountAgainstBots` / `CountFromBots` default
-`false` to match core's `PointsForBots`), every non-bot death counted on both,
-and bots given rows on neither (FR-DB-07).
+bot interactions excluded on both (this module reads core's `Rank.BotsEnabled` rather
+than carrying its own switch), every non-bot death counted on both, and bots given rows
+on neither (FR-DB-07).
 
 **Warmup breaks it, and no setting here reconciles it.** Core discards warmup deaths
 when `Rank.WarmupPoints` is off; this module has no warmup gate and records them, so
@@ -88,13 +88,13 @@ its totals run **high** by exactly the warmup kills. Closing that would mean eit
 (`GetPointSettings` carries the *setting*, not the current phase), or accepting the
 divergence. It is accepted for now.
 
-Three settings also break it, all of them deliberate operator choices:
+One setting also breaks it, a deliberate operator choice:
 
 | Setting | Effect on the invariant |
 |---|---|
 | `Tracking.CountFriendlyFire = true` | module counts team kills; core never does, so module `kills` runs **high** |
-| `Tracking.CountAgainstBots` disagreeing with core's `Rank.PointsForBots` | the two sides count different populations — **high** when this module is the permissive one, **low** when core is |
-| `Tracking.CountFromBots` disagreeing with core's `Rank.PointsForBots` | same, on `deaths` |
+
+The bot axis can no longer break it: there is nothing here to disagree with core.
 
 A **bug** also breaks it, and that is the one to care about: any event the
 module drops without being told to. §1.3 exists for exactly that reason.
@@ -103,32 +103,30 @@ module drops without being told to. §1.3 exists for exactly that reason.
 one. `headshot` is a priced *event*, not a stored stat, so per-weapon
 headshots are new data with nothing to reconcile against.
 
-### 1.2 The two bot switches
+### 1.2 Bots are core's switch
 
-The operator can exclude bot interactions along **two independent axes**,
-because the events carry two different counterparties:
+This module has **no bot setting**. It reads core's `Rank.BotsEnabled` through the
+API and applies it to both counterparties: with it off, hits, damage, kills,
+headshots and hitgroups against a bot are dropped, and so are deaths caused by one.
 
-| Setting | Default | Suppresses |
-|---|---|---|
-| `Tracking.CountAgainstBots` | `false` | hits, damage, kills, headshots, hitgroups where the **victim** is a bot |
-| `Tracking.CountFromBots` | `false` | deaths where the **killer** is a bot |
+It replaced a pair of independent switches here (`CountAgainstBots` /
+`CountFromBots`). The split was expressive — a practice server could keep bot kills
+while dropping deaths to bots — but it was also the only way to configure this
+module into disagreeing with core, which is the invariant above. One switch for the
+whole plugin set is worth more than the axis.
 
-Either, both or neither. The split is what lets a practice server keep bot kills
-while dropping deaths to bots, or the reverse.
+The value is polled rather than read per event: `GetPointSettings` builds a record
+and a dictionary, and `weapon_fire` runs at roughly 200/second. It refreshes when
+core becomes ready and on each flush tick, so an operator hot-reloading core's config
+is picked up within one flush interval.
 
-**Both default to `false` to match core's `Rank.PointsForBots`**, which also
-defaults `false` and gates bot interactions out of core's own counters
-(FR-PTS-03). That agreement is the only reason a freshly installed server
-reconciles; setting either independently of core's switch is the operator
-choosing to break the invariant above — legitimate, but a choice.
-
-Two consequences that are not obvious from the setting names:
+Two consequences that are not obvious from the setting name:
 
 - **Shots can never be filtered.** `weapon_fire` carries no victim, so with
-  `CountAgainstBots = false` the shots at a bot still count while the hits do
+  `BotsEnabled = false` the shots at a bot still count while the hits do
   not, and accuracy reads low. The event does not carry a target, so there is no
   version of this that works.
-- **Neither switch affects a bot's own rows.** A bot never has stats of its own
+- **The switch does not affect a bot's own rows.** A bot never has stats of its own
   under any setting — it has no SteamID64 to key them to (FR-DB-07).
 
 ### 1.3 Deaths with no weapon to attribute

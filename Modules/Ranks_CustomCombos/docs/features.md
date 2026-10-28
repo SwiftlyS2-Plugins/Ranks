@@ -198,7 +198,7 @@ Suppression is scoped deliberately:
 | `kills` / `deaths` / `assists` counters | **never** |
 
 That last row is FR-PTS-03: points are a judgement, counters are facts. The gates that
-do reach a counter are `WarmupPoints` and `PointsForBots`, and they do so by dropping
+do reach a counter are `WarmupPoints` and `BotsEnabled`, and they do so by dropping
 the death before this module is consulted at all — for everyone.
 
 ---
@@ -234,7 +234,7 @@ this shape rather than a plain `AddPoints` call:
 
 | Comes free from core | Would otherwise be reimplemented here |
 |---|---|
-| `MinPlayers`, `WarmupPoints`, `PointsForBots`, `FfaMode` | all four, from `GetPointSettings` |
+| `MinPlayers`, `WarmupPoints`, `BotsEnabled`, `FfaMode` | all four, from `GetPointSettings` |
 | VIP multiplier and flags | `VipMultiplier`, `VipFlags` |
 | Single away-from-zero rounding | the whole rounding rule |
 | `Points.ShowPointMessages` **and** the per-player `!togglepointmsg` preference | impossible — the per-player flag is not on `IRanksApi` |
@@ -305,7 +305,7 @@ these counts are keyed by SteamID in a plain map and simply wait for the next ti
 timer.
 
 **A combo counts whenever it matches, including when a gate refused the points** — FR-PTS-03
-again. The exceptions are `PointsForBots` and `WarmupPoints`: with either off, core discards the
+again. The exceptions are `BotsEnabled` and `WarmupPoints`: with either off, core discards the
 matching death and never consults the arbiter, so there is nothing to count.
 
 `!combos`, alias `!mycombos`, name and permission configurable in `commands.jsonc` like

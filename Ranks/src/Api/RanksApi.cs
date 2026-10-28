@@ -245,7 +245,7 @@ internal sealed class RanksApi : IRanksApi
             config.Rank.UseCoreRankingLogic,
             config.Rank.MinPlayers,
             config.Rank.WarmupPoints,
-            config.Rank.PointsForBots,
+            config.Rank.BotsEnabled,
             config.Rank.FfaMode,
             config.Vip.Multiplier,
             config.Vip.Flags.ToArray(),

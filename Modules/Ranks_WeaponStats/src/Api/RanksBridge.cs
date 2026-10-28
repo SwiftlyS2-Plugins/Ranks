@@ -116,6 +116,10 @@ internal sealed class RanksBridge
     /// <summary>True when core is in FFA mode, null when core is absent or not ready.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public bool? IsFfaMode() => _api is IRanksApi api ? api.GetPointSettings().FfaMode : null;
+
+    /// <summary>Core's bot policy, null when core is absent or not ready.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool? BotsEnabled() => _api is IRanksApi api ? api.GetPointSettings().BotsEnabled : null;
 }
 
 /// <summary>This module's hook into core's lifecycle.</summary>

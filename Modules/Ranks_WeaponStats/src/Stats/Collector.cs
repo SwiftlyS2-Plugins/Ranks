@@ -28,6 +28,15 @@ internal sealed class Collector
     /// </remarks>
     private volatile WeaponStatsConfig _config;
 
+    /// <summary>Core's <c>Rank.BotsEnabled</c>, pushed in rather than configured here.</summary>
+    /// <remarks>
+    /// One switch for the whole plugin set: a module carrying its own would let an operator set it
+    /// differently from core's and silently break the reconciliation this module documents.
+    /// Polled rather than read per event — GetPointSettings builds a record and a dictionary, and
+    /// weapon_fire alone runs at roughly 200/second.
+    /// </remarks>
+    public volatile bool BotsEnabled;
+
     public Collector(ISwiftlyCore core, WeaponStatsConfig config, ILogger logger)
     {
         _core = core;
@@ -41,7 +50,7 @@ internal sealed class Collector
     /// <remarks>
     /// A bot therefore never owns a row: its slot stays null and every handler returns on the null
     /// check it already has. Whether a bot counts as the <em>counterparty</em> is a separate
-    /// question, answered by the two Tracking switches.
+    /// question, answered by core's <c>Rank.BotsEnabled</c>.
     /// </remarks>
     public void Adopt(IPlayer player)
     {
@@ -90,7 +99,7 @@ internal sealed class Collector
     [GameEventHandler(HookMode.Post)]
     public HookResult OnWeaponFire(EventWeaponFire e)
     {
-        // No guards at all: there is no victim to test, so neither the bot switches nor the
+        // No guards at all: there is no victim to test, so neither core's bot policy nor the
         // friendly-fire rule has anything to say about a shot.
         if (Session(e.UserIdPlayer) is not { } stats) return HookResult.Continue;
 
@@ -118,12 +127,12 @@ internal sealed class Collector
         var counters = stats.For(WeaponNames.Normalize(e.Weapon));
 
         // Cleared ahead of both guards: a bullet that struck a teammate, or a bot on a server with
-        // CountAgainstBots off, landed. That is a hit which goes uncounted, not a miss — clearing
+        // BotsEnabled off, landed. That is a hit which goes uncounted, not a miss — clearing
         // after the guards would score every such shot as missed.
         counters.PendingShot = false;
 
         if (IsExcluded(config.Tracking, attacker, victim)) return HookResult.Continue;
-        if (!CountAgainst(config.Tracking, victim)) return HookResult.Continue;
+        if (!CountsAgainst(victim)) return HookResult.Continue;
 
         // Actual* throughout: DmgHealth is a short and Hitgroup a byte, so a server granting more
         // than 255 HP silently corrupts the narrow ones.
@@ -156,7 +165,7 @@ internal sealed class Collector
         var victim = e.UserIdPlayer;
         var weapon = WeaponNames.Normalize(e.Weapon);
 
-        if (!IsExcluded(config.Tracking, attacker, victim) && CountAgainst(config.Tracking, victim) && Session(attacker) is { } killer)
+        if (!IsExcluded(config.Tracking, attacker, victim) && CountsAgainst(victim) && Session(attacker) is { } killer)
         {
             var counters = killer.For(weapon);
             counters.Kills++;
@@ -166,7 +175,7 @@ internal sealed class Collector
 
         // Deaths deliberately skip IsExcluded: being killed by a teammate is still a death, and
         // core's ranks_players.deaths counts every death whatever killed the player.
-        if (CountFrom(config.Tracking, attacker) && Session(victim) is { } died)
+        if (CountsAgainst(attacker) && Session(victim) is { } died)
             died.For(weapon).Deaths++;
 
         return HookResult.Continue;
@@ -176,7 +185,7 @@ internal sealed class Collector
         player is not null && (uint)player.Slot < MaxSlots ? _slots[player.Slot] : null;
 
     /// <remarks>
-    /// Friendly fire and self damage are dropped before the bot switches are consulted. Self
+    /// Friendly fire and self damage are dropped before core's bot policy is consulted. Self
     /// damage is never combat performance under any setting, so it is not configurable; same-team
     /// is the operator's call.
     /// </remarks>
@@ -215,9 +224,5 @@ internal sealed class Collector
     /// <summary>A null counterparty is world damage, not a bot, and must keep counting.</summary>
     private static bool IsBot(IPlayer? player) => player is { IsFakeClient: true };
 
-    private static bool CountAgainst(TrackingConfig tracking, IPlayer? victim) =>
-        tracking.CountAgainstBots || !IsBot(victim);
-
-    private static bool CountFrom(TrackingConfig tracking, IPlayer? attacker) =>
-        tracking.CountFromBots || !IsBot(attacker);
+    private bool CountsAgainst(IPlayer? counterparty) => BotsEnabled || !IsBot(counterparty);
 }

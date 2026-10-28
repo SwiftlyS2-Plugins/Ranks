@@ -118,15 +118,14 @@ Validate at load, clamping rather than throwing:
 | Key | Rule |
 |---|---|
 | `Tracking.CountFriendlyFire` | bool, no validation — default `false` |
-| `Tracking.CountAgainstBots` | bool, no validation — default `false` |
-| `Tracking.CountFromBots` | bool, no validation — default `false` |
+| `Tracking.CountFriendlyFire` | bool, no validation — default `false` |
 | `Database.FlushIntervalSeconds` | `>= 0`; `0` disables the timer |
 | `Display.TopWeapons` | `1..50` |
 | `Display.MinShotsToList` | `>= 0` |
 
 **All three `Tracking` defaults are the binder's own `default(bool)`.** That is
 correct for each of them now: `CountFriendlyFire` was always meant to be off,
-and the two bot switches default off to match core's `Rank.PointsForBots`, which
+and the two bot switches default off to match core's `Rank.BotsEnabled`, which
 gates bot interactions out of core's counters (FR-PTS-03). An absent or
 malformed key therefore lands on the reconciling value rather than away from it,
 so none of them needs an explicit initialiser.
@@ -403,8 +402,7 @@ private static bool IsExcluded(TrackingConfig c, IPlayer? attacker, IPlayer? vic
 // A null counterparty is world damage, not a bot, and must keep counting.
 private static bool IsBot(IPlayer? p) => p is { IsFakeClient: true };
 
-private static bool CountAgainst(TrackingConfig c, IPlayer? victim)  => c.CountAgainstBots || !IsBot(victim);
-private static bool CountFrom(TrackingConfig c, IPlayer? attacker)   => c.CountFromBots    || !IsBot(attacker);
+private bool CountsAgainst(IPlayer? counterparty) => BotsEnabled || !IsBot(counterparty);
 ```
 
 The config snapshot is read **once at the top of each event**, per guide §3.2
@@ -583,10 +581,10 @@ are `[Obsolete]` and throw at runtime.
       hitgroup increments **no hitgroup counter** and still records its weapon row
 - [ ] `SUM(kills)` and `SUM(deaths)` per player reconcile against
       `ranks_players` **at default `Tracking` settings** — including after a
-      fall death and a bot kill with `PointsForBots = false`
+      fall death and a bot kill with `BotsEnabled = false`
 - [ ] An absent `Tracking` bot key binds to `true`, not `false`
-- [ ] `CountAgainstBots = false` stops bot kills and bot hitgroups while deaths
-      to bots keep counting; `CountFromBots = false` does the reverse
+- [ ] core's `Rank.BotsEnabled = false` stops bot kills, bot hitgroups and deaths
+  to bots alike; turning it on starts all of them, with no module-side setting involved
 - [ ] `CountFriendlyFire = false` drops team hits, damage and kills while a
       death to a teammate still counts; `= true` records all four
 - [ ] Firing an AK and killing with it land on **one** row named `weapon_ak47`,

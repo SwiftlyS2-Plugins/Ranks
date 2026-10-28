@@ -215,7 +215,7 @@ watching `player_death` on its own cannot stop core, and plugin order is not gua
 
 A combo is counted whenever it matches, including when a gate refuses the points —
 points are a judgement, counters are facts. The exceptions are the two gates that drop
-the death event itself: with core's `PointsForBots` off a bot-involved kill never
+the death event itself: with core's `BotsEnabled` off a bot-involved kill never
 reaches this module, and with its `WarmupPoints` off neither does a warmup kill.
 
 **Award Flow**

@@ -375,7 +375,7 @@ connect" into one line at boot.
 
 **Fake clients are never tracked and never get a row.** The filter is
 `IPlayer.IsFakeClient`, applied at load, and it is independent of
-`Rank.PointsForBots` — that gate decides whether a *human* earns points from a
+`Rank.BotsEnabled` — that gate decides whether a *human* earns points from a
 bot kill, not whether the bot itself has a record. Bots have no SteamID64, so
 persisting them would key every bot on the server to the same value.
 
@@ -568,11 +568,11 @@ A configured value of `0` disables the event, including its chat line, but
 |---|---|---|
 | Minimum players on the server | `Rank.MinPlayers` | `4` |
 | Warmup | `Rank.WarmupPoints` | `false` (no points during warmup) |
-| Bot victim/actor | `Rank.PointsForBots` | `false` |
+| Bot victim/actor | `Rank.BotsEnabled` | `false` |
 | FFA mode (suppresses team-damage penalties) | `Rank.FfaMode` | `false` |
 
 **`MinPlayers` and `FfaMode` suppress the award, never the stat increment.
-`WarmupPoints` and `PointsForBots` discard the death event outright.**
+`WarmupPoints` and `BotsEnabled` discard the death event outright.**
 
 `MinPlayers` and `FfaMode` are judgements about when play is worth paying for —
 the kills still happened, between real players, so a kill below `MinPlayers`
@@ -580,7 +580,7 @@ still counts. That is the same separation FR-PTS-02 states for a configured valu
 of `0` and FR-PTS-00 for `UseCoreRankingLogic = false`: points are a judgement,
 counters are facts.
 
-`WarmupPoints` and `PointsForBots` are different in kind. They do not ask whether
+`WarmupPoints` and `BotsEnabled` are different in kind. They do not ask whether
 play was worth paying for, they ask whether this was play at all — a warmup round
 is not the match, and a bot is not a player. With either `false`, the matching
 `player_death` is dropped before anything derives from it: no `kills`, `deaths` or
@@ -599,13 +599,12 @@ Both gate the three counterparty counters and everything downstream of the death
 `bombs_defused` come from other events and are unaffected — warmup rounds that end
 still move the round counters.
 
-> **Consequence for `SUM(WeaponStats.kills)`.** The reconciliation against
-> `ranks_players.kills` requires `Ranks_WeaponStats`'s `CountAgainstBots` /
-> `CountFromBots` to agree with `PointsForBots`. Both ship `false` to match its
-> default, so the bot half reconciles. **The warmup half does not**:
-> `Ranks_WeaponStats` has no warmup gate, so with `WarmupPoints` off it records
-> warmup kills that core now discards, and its total runs ahead on any server with
-> warmup enabled.
+> **Consequence for `SUM(WeaponStats.kills)`.** The bot half reconciles by
+> construction: `Ranks_WeaponStats` carries no bot switch and reads `BotsEnabled`
+> through the API, so the two sides cannot be configured into disagreeing. **The
+> warmup half does not**: `Ranks_WeaponStats` has no warmup gate, so with
+> `WarmupPoints` off it records warmup kills that core now discards, and its total
+> runs ahead on any server with warmup enabled.
 
 Gate state must be readable from the API (FR-API-05) so a module can skip
 expensive work it knows will be discarded.
@@ -720,7 +719,7 @@ fresh-player case this feature exists to handle.
   multiplier is `1.0` and the configured value applies as-is; there is no
   counterparty to compare against. The kill side does not arise: no attacker
   means no `kill`.
-- **Bot counterparty.** Governed by `Rank.PointsForBots`: when bots score no
+- **Bot counterparty.** Governed by `Rank.BotsEnabled`: when bots score no
   points the event is gated out entirely and the multiplier never runs. When
   they do count, a bot has no record and counts as `0`. On the kill side that
   puts `d = −1`, so **killing a bot pays `DynamicKillMin`** — bot farming
@@ -1683,7 +1682,7 @@ sealed record RanksPointSettings(
     // gates
     int    MinPlayers,
     bool   WarmupPoints,
-    bool   PointsForBots,
+    bool   BotsEnabled,
     bool   FfaMode,
     // multipliers
     double VipMultiplier,
@@ -1984,7 +1983,7 @@ module from reimplementing core:
 
 | Comes from core | Otherwise reimplemented in every module |
 |---|---|
-| `MinPlayers`, `WarmupPoints`, `PointsForBots`, `FfaMode` | all four, from `GetPointSettings` |
+| `MinPlayers`, `WarmupPoints`, `BotsEnabled`, `FfaMode` | all four, from `GetPointSettings` |
 | VIP multiplier and flags | `VipMultiplier`, `VipFlags` |
 | Single away-from-zero rounding | the whole rounding rule |
 | `Points.ShowPointMessages` and the per-player `!togglepointmsg` preference | **impossible** — the per-player flag is not on `IRanksApi` |

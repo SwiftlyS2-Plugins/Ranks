@@ -102,7 +102,7 @@ public PerfCounters? GetCounters(ulong steamId)
 [MethodImpl(MethodImplOptions.NoInlining)]
 public CoreSettings? GetSettings() =>
     _api is IRanksApi a && a.GetPointSettings() is { } p
-        ? new CoreSettings(p.UseCoreRankingLogic, p.StartPoints, p.MinPoints, p.MinPlayers, p.WarmupPoints, p.PointsForBots)
+        ? new CoreSettings(p.UseCoreRankingLogic, p.StartPoints, p.MinPoints, p.MinPlayers, p.WarmupPoints, p.BotsEnabled)
         : null;
 ```
 
@@ -248,7 +248,7 @@ operator's typo would look like working software.
 
 ### 3.1 Settings read from core, not configured here
 
-`StartPoints`, `MinPoints`, `MinPlayers`, `WarmupPoints` and `PointsForBots`
+`StartPoints`, `MinPoints`, `MinPlayers`, `WarmupPoints` and `BotsEnabled`
 come from `GetPointSettings()` on every match settle, never cached at load —
 `GetPointSettings` returns a fresh snapshot per call precisely so it tracks live
 reloads (FR-API-05).
@@ -540,7 +540,7 @@ private double ImputedRating(int teamNum) =>
 ```
 
 A team with no rated humans makes the match unrated when core's
-`Rank.PointsForBots` is `false` (features.md §3). That check happens once at
+`Rank.BotsEnabled` is `false` (features.md §3). That check happens once at
 settle time, not per round — a team can legitimately have no rated humans for a
 few rounds and then gain one.
 

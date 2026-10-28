@@ -933,7 +933,7 @@ A failed load leaves the player **untracked** and retries. Never substitute a
 fresh empty record: the next absolute save would wipe the real row.
 
 `IsFakeClient` is filtered at load. Bots never get a record and never get a row,
-independent of `Rank.PointsForBots` (FR-DB-07).
+independent of `Rank.BotsEnabled` (FR-DB-07).
 
 > **No per-tick subscription** (NFR-11). `OnTick` and `OnWorldUpdate` fire every
 > tick and must be allocation-free; nothing here is tick-driven. The periodic

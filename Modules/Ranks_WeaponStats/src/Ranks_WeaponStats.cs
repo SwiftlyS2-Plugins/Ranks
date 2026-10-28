@@ -205,7 +205,13 @@ public sealed class RanksWeaponStats : BasePlugin
 
         // Deliberately not paired with StopOnMapChange: the flush must outlive a map change, and
         // OnMapUnload is a flush point rather than a teardown.
-        _flushTimer = Core.Scheduler.RepeatBySeconds(interval, FlushNow);
+        _flushTimer = Core.Scheduler.RepeatBySeconds(interval, () =>
+        {
+            FlushNow();
+
+            // Picks up an operator hot-reloading core's config, which this module gets no event for.
+            if (_bridge.IsAvailable) RefreshBotPolicy();
+        });
     }
 
     private void OnPutInServer(IOnClientPutInServerEvent e)
@@ -238,8 +244,19 @@ public sealed class RanksWeaponStats : BasePlugin
 
     private void OnRanksReady()
     {
+        RefreshBotPolicy();
         WarnOnFfaMismatch();
         ReconcileOrphansOnce();
+    }
+
+    /// <remarks>
+    /// Polled rather than read per event: GetPointSettings builds a record and a dictionary, and
+    /// weapon_fire runs at roughly 200/second. A null means core is not ready, which leaves the
+    /// last known value rather than silently flipping to counting bots.
+    /// </remarks>
+    private void RefreshBotPolicy()
+    {
+        if (_bridge.BotsEnabled() is { } enabled) _collector.BotsEnabled = enabled;
     }
 
     /// <remarks>

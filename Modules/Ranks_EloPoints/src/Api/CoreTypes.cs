@@ -15,4 +15,4 @@ internal readonly record struct CoreSettings(
     int MinPoints,
     int MinPlayers,
     bool WarmupPoints,
-    bool PointsForBots);
+    bool BotsEnabled);

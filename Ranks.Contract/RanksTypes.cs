@@ -87,7 +87,7 @@ public sealed record RanksPointSettings(
     bool UseCoreRankingLogic,
     int MinPlayers,
     bool WarmupPoints,
-    bool PointsForBots,
+    bool BotsEnabled,
     bool FfaMode,
     double VipMultiplier,
     IReadOnlyList<string> VipFlags,

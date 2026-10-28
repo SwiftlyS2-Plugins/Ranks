@@ -7,18 +7,6 @@ internal sealed class TrackingConfig
 {
     [Description("Record hits, damage and kills against a teammate. Turn this on for FFA servers, where same-team is nearly every interaction.")]
     public bool CountFriendlyFire { get; set; }
-
-    /// <remarks>
-    /// Both default to false to match core's <c>Rank.PointsForBots</c>, which gates bot kills,
-    /// deaths and assists out of its own counters (FR-PTS-03). Defaulting them to true would make
-    /// the shipped configuration fail to reconcile: this module would count bot interactions that
-    /// core does not. Flip both only alongside core's switch.
-    /// </remarks>
-    [Description("Record interactions where the victim is a bot. Match this to core's Rank.PointsForBots.")]
-    public bool CountAgainstBots { get; set; }
-
-    [Description("Record interactions where the attacker is a bot. Match this to core's Rank.PointsForBots.")]
-    public bool CountFromBots { get; set; }
 }
 
 internal sealed class DatabaseConfig
