@@ -147,14 +147,14 @@ internal sealed class CommandRegistry
     {
         if (_registry.BySlot(player.Slot) is not { } record)
         {
-            player.SendChat(_core.Localizer["error.not_loaded"]);
+            Chat.Send(_core, player, "error.not_loaded");
             return;
         }
 
         record.ShowPointMessages = !record.ShowPointMessages;
         record.Dirty = true;
 
-        player.SendChat(_core.Localizer[record.ShowPointMessages ? "settings.point_messages_on" : "settings.point_messages_off"]);
+            Chat.Send(_core, player, record.ShowPointMessages ? "settings.XP_messages_on" : "settings.XP_messages_off");
     }
 
     /// <remarks>
@@ -165,7 +165,7 @@ internal sealed class CommandRegistry
     {
         if (_registry.BySlot(player.Slot) is not { } record)
         {
-            player.SendChat(_core.Localizer["error.not_loaded"]);
+            Chat.Send(_core, player, "error.not_loaded");
             return;
         }
 
@@ -175,12 +175,12 @@ internal sealed class CommandRegistry
         {
             _pendingResets.Remove(record.SteamId);
             ResetRecord(record);
-            player.SendChat(_core.Localizer["reset.done"]);
+            Chat.Send(_core, player, "reset.done");
             return;
         }
 
         _pendingResets[record.SteamId] = now;
-        player.SendChat(_core.Localizer["reset.confirm", (int)ResetConfirmWindow.TotalSeconds]);
+        Chat.Send(_core, player, "reset.confirm", (int)ResetConfirmWindow.TotalSeconds);
     }
 
     private static readonly TimeSpan ResetConfirmWindow = TimeSpan.FromSeconds(15);

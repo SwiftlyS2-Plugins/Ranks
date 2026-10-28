@@ -124,7 +124,7 @@ public sealed class ScoreboardOptions
 
     public bool ScoreSync { get; set; } = false;
 
-    public bool Clantags { get; set; } = true;
+    public bool Clantags { get; set; } = false;
 
     /// <remarks>Read by the icon modes (Competitive, Wingman, DangerZone); Premier and Custom ignore it.</remarks>
     public int SkillGroupOffset { get; set; } = 0;
@@ -153,11 +153,6 @@ public sealed class PointsOptions
 
     public double DynamicDeathMax { get; set; } = 3.0;
 
-    /// <remarks>
-    /// Source units, at roughly 2.54 cm each — so 2000 is about 50 m. The unit is ambiguous
-    /// enough that the shipped comment must state the ratio, or the next reader converts at
-    /// 1.905 cm and lands on 38 m.
-    /// </remarks>
     public int LongDistanceUnits { get; set; } = 2000;
 
     /// <remarks><c>0</c> puts no time limit on a streak; the round already bounds it.</remarks>
@@ -165,8 +160,6 @@ public sealed class PointsOptions
 
     /// <remarks>Streaks are per-round accumulation, so carrying one across a round boundary is the exception.</remarks>
     public bool KillstreakResetOnRoundEnd { get; set; } = true;
-
-    public bool ShowPlayerNames { get; set; } = false;
 
     public bool KillStreaksEnabled { get; set; } = true;
 

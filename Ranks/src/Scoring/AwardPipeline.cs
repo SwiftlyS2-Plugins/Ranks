@@ -239,7 +239,7 @@ internal sealed class AwardPipeline
 
         _events.RaisePointsChanged(new RanksPointsChangedArgs(record.SteamId, oldPoints, record.Points, applied, reason));
 
-        if (showMessage) ReportPoints(config, record, applied, reason, counterparty, displayText);
+        if (showMessage) ReportPoints(config, record, applied, reason, displayText);
 
         if (record.RankIndex != oldIndex) ReportRankChange(config, record, oldIndex);
     }
@@ -291,7 +291,7 @@ internal sealed class AwardPipeline
         return DynamicScaling.Multiplier(DynamicScaling.Difference(victim, attacker), min, max);
     }
 
-    private void ReportPoints(RanksConfig config, PlayerRecord record, int delta, string reason, ulong? counterparty, string? displayText = null)
+    private void ReportPoints(RanksConfig config, PlayerRecord record, int delta, string reason, string? displayText = null)
     {
         if (!config.Points.ShowPointMessages || !record.ShowPointMessages) return;
 
@@ -305,26 +305,8 @@ internal sealed class AwardPipeline
         var player = FindPlayer(record.SteamId);
         if (player is null) return;
 
-        var gained = delta > 0;
-        var opponent = CounterpartyName(config, counterparty);
-
-        player.SendChat(opponent is null
-            ? _core.Localizer[gained ? "points.gained" : "points.lost", Math.Abs(delta), DescribeReason(reason, displayText), record.Points]
-            : _core.Localizer[gained ? "points.gained_vs" : "points.lost_vs", Math.Abs(delta), DescribeReason(reason, displayText), opponent, record.Points]);
-    }
-
-    /// <remarks>
-    /// Null unless the operator asked for names <em>and</em> the counterparty is a tracked player:
-    /// a bot has no record, and inventing a label for one would make the line claim a name the
-    /// scoreboard never showed.
-    /// </remarks>
-    private string? CounterpartyName(RanksConfig config, ulong? counterparty)
-    {
-        if (!config.Points.ShowPlayerNames || counterparty is not { } steamId) return null;
-
-        var name = _registry.BySteamId(steamId)?.Name;
-
-        return string.IsNullOrWhiteSpace(name) ? null : name;
+        Chat.Send(_core, player, delta > 0 ? "XP.gained" : "XP.lost",
+            Math.Abs(delta), DescribeReason(reason, displayText));
     }
 
     /// <remarks>
@@ -355,7 +337,7 @@ internal sealed class AwardPipeline
         if (player is null) return;
 
         var key = promoted ? "rank.promoted" : "rank.demoted";
-        player.SendChat(_core.Localizer[key, tiers[record.RankIndex].Name, record.Points]);
+        Chat.Send(_core, player, key, tiers[record.RankIndex].Name, record.Points);
     }
 
     /// <summary>Flushes buffered point lines at round end (FR-PTS-08).</summary>
@@ -372,8 +354,8 @@ internal sealed class AwardPipeline
 
             if (!record.ShowPointMessages) continue;
 
-            FindPlayer(record.SteamId)?.SendChat(
-                _core.Localizer["points.summary", delta > 0 ? "+" : "", delta, record.Points]);
+            if (FindPlayer(record.SteamId) is { } player)
+                Chat.Send(_core, player, "XP.summary", delta > 0 ? "+" : "", delta);
         }
     }
 

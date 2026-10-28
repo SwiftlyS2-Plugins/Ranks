@@ -859,7 +859,6 @@ system inside core is not the answer.
 |---|---|
 | `Points.ShowPointMessages` (default `true`) | Per-action chat lines. |
 | `Points.RoundEndSummary` (default `false`) | Buffer per-action lines and emit one aggregated summary at round end instead. |
-| `Points.ShowPlayerNames` (default `false`) | Include killer/victim names in point lines. |
 | Per-player override | `!togglepointmsg`, persisted in `ranks_settings`. |
 
 ### FR-PTS-09 — Combination scoring is a module, not core

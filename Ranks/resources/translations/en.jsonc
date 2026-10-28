@@ -16,14 +16,12 @@
 
   // ---- XP feedback -----------------------------------------------------
 
-  "XP.gained": "[lime]+{0}[default] XP [grey]({2}) [default]{2}",
-  "XP.lost": "[red]-{0}[default] XP [grey]({2}) [default]{2}",
+  "XP.gained": "[lime]+{0}[default] XP [grey]({1})",
+  "XP.lost": "[red]-{0}[default] XP [grey]({1})",
 
-  // Used instead of the two above when XP.ShowPlayerNames is on and there is a counterparty.
-  "XP.gained_vs": "[lime]+{0}[default] XP for [gold]{1}[default] against [lime]{2}[default]. Total: [lime]{3}[default].",
-  "XP.lost_vs": "[red]-{0}[default] XP for [gold]{1}[default] against [lime]{2}[default]. Total: [lime]{3}[default].",
-
-  "XP.summary": "Round total: [gold]{0}{1}[default] XP. You now have [lime]{2}[default].",
+  // Deliberately carries no reasons: the per-event lines are what name them, and this replaces
+  // those lines rather than summarising them.
+  "XP.summary": "[default]Round summary: [gold]{0}{1}[default] XP",
 
   // ---- Rank changes -------------------------------------------------------
 
@@ -82,16 +80,18 @@
   //
   // Shown by sw_help. Not a config field: it is player-facing, so it is translatable.
 
+  // Keyed on the command's key in commands.jsonc, not on the display wording — the lookup is
+  // command.{key}.help, so renaming these to match "XP" would render a raw marker instead.
   "command.rank.help": "Show your rank, XP and progress to the next band.",
   "command.ranks.help": "Show the full rank ladder.",
   "command.top.help": "Show the XP leaderboard.",
   "command.stats.help": "Show your kills, deaths and objective statistics.",
   "command.settings.help": "Open your Ranks preferences.",
   "command.resetmyrank.help": "Reset your own XP and statistics. Requires confirmation.",
-  "command.toggleXPmsg.help": "Turn your XP chat messages on or off.",
-  "command.setXP.help": "Set a player's XP to an exact value.",
-  "command.giveXP.help": "Add XP to a player.",
-  "command.removeXP.help": "Subtract XP from a player.",
+  "command.togglepointmsg.help": "Turn your XP chat messages on or off.",
+  "command.setpoints.help": "Set a player's XP to an exact value.",
+  "command.givepoints.help": "Add XP to a player.",
+  "command.removepoints.help": "Subtract XP from a player.",
   "command.resetrank.help": "Reset a player's XP and statistics.",
 
   // ---- Event names --------------------------------------------------------
@@ -100,49 +100,49 @@
   // AddXP with its own reason string has that string shown verbatim, since core cannot ship
   // a key for a reason it has never heard of.
 
-  "event.kill": "a kill",
-  "event.death": "dying",
-  "event.assist": "an assist",
-  "event.assist_flash": "a flash assist",
-  "event.headshot": "a headshot",
-  "event.suicide": "a suicide",
-  "event.team_kill": "a team kill",
-  "event.team_assist": "a team assist",
-  "event.noscope": "a no-scope",
-  "event.wallbang": "a wallbang",
-  "event.through_smoke": "a kill through smoke",
-  "event.blind_kill": "a blind kill",
-  "event.long_distance": "a long-distance kill",
-  "event.knife_kill": "a knife kill",
-  "event.taser_kill": "a taser kill",
-  "event.grenade_kill": "a grenade kill",
-  "event.inferno_kill": "a fire kill",
-  "event.impact_kill": "an impact kill",
-  "event.bomb_plant": "planting the bomb",
-  "event.bomb_defuse": "defusing the bomb",
-  "event.bomb_defuse_others": "your team defusing the bomb",
-  "event.bomb_exploded": "the bomb exploding",
-  "event.bomb_pickup": "picking up the bomb",
-  "event.bomb_drop": "dropping the bomb",
-  "event.hostage_rescue": "rescuing a hostage",
-  "event.hostage_rescue_all": "all hostages rescued",
-  "event.hostage_hurt": "hurting a hostage",
-  "event.hostage_kill": "killing a hostage",
-  "event.round_win": "winning the round",
-  "event.round_lose": "losing the round",
-  "event.mvp": "being round MVP",
-  "event.match_win": "winning the match",
-  "event.match_lose": "losing the match",
+  "event.kill": "Kill",
+  "event.death": "Death",
+  "event.assist": "Assist",
+  "event.assist_flash": "Flash Assist",
+  "event.headshot": "Headshot",
+  "event.suicide": "Suicide",
+  "event.team_kill": "Team Kill",
+  "event.team_assist": "Team Assist",
+  "event.noscope": "No Scope",
+  "event.wallbang": "Wallbang",
+  "event.through_smoke": "Through Smoke",
+  "event.blind_kill": "Blind Kill",
+  "event.long_distance": "Long Distance",
+  "event.knife_kill": "Knife Kill",
+  "event.taser_kill": "Zeus Kill",
+  "event.grenade_kill": "Grenade Kill",
+  "event.inferno_kill": "Molotov/Incendiary Kill",
+  "event.impact_kill": "Impact Kill",
+  "event.bomb_plant": "Bomb Plant",
+  "event.bomb_defuse": "Bomb Defuse",
+  "event.bomb_defuse_others": "Bomb Defused",
+  "event.bomb_exploded": "Bomb Exploded",
+  "event.bomb_pickup": "Bomb Pickup",
+  "event.bomb_drop": "Bomb Drop",
+  "event.hostage_rescue": "Hostage Rescue",
+  "event.hostage_rescue_all": "All Hostages Rescued",
+  "event.hostage_hurt": "Hostage Hurt",
+  "event.hostage_kill": "Hostage Kill",
+  "event.round_win": "Round Win",
+  "event.round_lose": "Round Loss",
+  "event.mvp": "MVP",
+  "event.match_win": "Match Win",
+  "event.match_lose": "Match Loss",
 
-  "event.streak.double": "a double kill",
-  "event.streak.triple": "a triple kill",
-  "event.streak.domination": "a domination",
-  "event.streak.rampage": "a rampage",
-  "event.streak.mega": "a mega kill",
-  "event.streak.ownage": "ownage",
-  "event.streak.ultra": "an ultra kill",
-  "event.streak.killing_spree": "a killing spree",
-  "event.streak.monster": "a monster kill",
-  "event.streak.unstoppable": "being unstoppable",
-  "event.streak.godlike": "being godlike"
+  "event.streak.double": "Double Kill",
+  "event.streak.triple": "Triple Kill",
+  "event.streak.domination": "Domination",
+  "event.streak.rampage": "Rampage",
+  "event.streak.mega": "Mega Kill",
+  "event.streak.ownage": "Ownage",
+  "event.streak.ultra": "Ultra Kill",
+  "event.streak.killing_spree": "Killing Spree",
+  "event.streak.monster": "Monster Kill",
+  "event.streak.unstoppable": "Unstoppable",
+  "event.streak.godlike": "GODLIKE"
 }

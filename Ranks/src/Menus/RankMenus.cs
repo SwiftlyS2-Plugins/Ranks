@@ -40,7 +40,7 @@ internal sealed class RankMenus
 
         if (record is null)
         {
-            player.SendChat(_core.Localizer["error.not_loaded"]);
+            Chat.Send(_core, player, "error.not_loaded");
             return;
         }
 
@@ -54,14 +54,16 @@ internal sealed class RankMenus
             .WithTitle(_core.Localizer["menu.rank.title"])
             .WithItemsPerPage(8)
             .Add(new TextComponent(_core.Localizer["menu.rank.current", tier.Name]))
-            .Add(new TextComponent(_core.Localizer["menu.rank.points", record.Points]))
+            .Add(new TextComponent(_core.Localizer["menu.rank.XP", record.Points]))
             .Add(new ProgressBarComponent(
                 toNext is { } remaining
                     ? _core.Localizer["menu.rank.next", _ladder.NextTier(record.Points)!.Name, remaining]
                     : _core.Localizer["menu.rank.top_band"],
                 _ => progress,
                 multiLine: false))
-            .Add(new ButtonComponent(_core.Localizer["menu.rank.ladder"], _ => { OpenLadder(player); return ValueTask.CompletedTask; }))
+            // Submenus rather than ButtonComponent + Open(): Open() starts a new root menu with no
+            // back-stack, so the framework's configured navigation has nothing to go back to.
+            .Add(new SubmenuComponent(_core.Localizer["menu.rank.ladder"], _ => BuildLadder(player)))
             .Add(new ButtonComponent(_core.Localizer["menu.rank.stats"], _ => { ShowStats(player); return ValueTask.CompletedTask; }))
             .Build();
 
@@ -69,7 +71,9 @@ internal sealed class RankMenus
     }
 
     /// <summary>The whole ladder, marking where the player currently sits.</summary>
-    public void OpenLadder(IPlayer player)
+    public void OpenLadder(IPlayer player) => BuildLadder(player).Open(player);
+
+    private IMenu BuildLadder(IPlayer player)
     {
         var record = _registry.BySlot(player.Slot);
         var index = record is null ? -1 : record.RankIndex;
@@ -86,7 +90,7 @@ internal sealed class RankMenus
             builder.Add(new TextComponent(_core.Localizer[key, tiers[i].Name, tiers[i].Points]));
         }
 
-        builder.Build().Open(player);
+        return builder.Build();
     }
 
     /// <summary>Preferences. Currently one toggle, which maps 1:1 onto the stored column.</summary>
@@ -96,14 +100,14 @@ internal sealed class RankMenus
 
         if (record is null)
         {
-            player.SendChat(_core.Localizer["error.not_loaded"]);
+            Chat.Send(_core, player, "error.not_loaded");
             return;
         }
 
         _core.Menu.CreateMenu("ranks.settings")
             .WithTitle(_core.Localizer["menu.settings.title"])
             .Add(new ToggleComponent(
-                _core.Localizer["menu.settings.point_messages"],
+                _core.Localizer["menu.settings.XP_messages"],
                 record.ShowPointMessages,
                 ctx =>
                 {
@@ -121,17 +125,17 @@ internal sealed class RankMenus
 
         if (record is null)
         {
-            player.SendChat(_core.Localizer["error.not_loaded"]);
+            Chat.Send(_core, player, "error.not_loaded");
             return;
         }
 
         var ratio = record.Deaths == 0 ? record.Kills : Math.Round(record.Kills / (double)record.Deaths, 2);
 
-        player.SendChat(_core.Localizer["stats.header"]);
-        player.SendChat(_core.Localizer["stats.combat", record.Kills, record.Deaths, record.Assists, ratio]);
-        player.SendChat(_core.Localizer["stats.rounds", record.RoundWins, record.RoundLosses]);
-        player.SendChat(_core.Localizer["stats.matches", record.MatchWins, record.MatchLosses]);
-        player.SendChat(_core.Localizer["stats.bombs", record.BombsPlanted, record.BombsDefused]);
+        Chat.Send(_core, player, "stats.header");
+        Chat.Send(_core, player, "stats.combat", record.Kills, record.Deaths, record.Assists, ratio);
+        Chat.Send(_core, player, "stats.rounds", record.RoundWins, record.RoundLosses);
+        Chat.Send(_core, player, "stats.matches", record.MatchWins, record.MatchLosses);
+        Chat.Send(_core, player, "stats.bombs", record.BombsPlanted, record.BombsDefused);
     }
 
     /// <summary>The leaderboard. Paging is the component's job, so nothing here hand-rolls it.</summary>
