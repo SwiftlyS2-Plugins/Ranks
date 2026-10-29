@@ -24,4 +24,8 @@ Notable changes to Ranks, newest first.
 
 ## [1.0.0] - 2026-10-29
 
+- Fixed modules depenency loading when publishing the plugin
+
+## [1.0.0] - 2026-10-29
+
 - Initial release
