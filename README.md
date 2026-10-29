@@ -11,13 +11,18 @@
 </p>
 
 > [!NOTE]
-> **Coming from another ranking plugin?** A migration tool for **K4-LevelRanks** and other
-> popular ranking plugins is in development and will be shared shortly — points, stats and
-> per-weapon history carried across in one step. Keep your old database until then.
+> **Migrating from another ranking plugin?** [Ranks_Importer](https://github.com/shmitzas/PluginDataImporters)
+> is a separate one-shot tool that imports from [LVL Ranks](https://github.com/Pisex/cs2-lvl_ranks),
+> [K4-LevelRanks-SwiftlyS2](https://github.com/K4ryuu/K4-LevelRanks-SwiftlyS2),
+> [K4-LevelRanks-Upkeep](https://github.com/shmitzas/K4-LevelRanks-Upkeep),
+> [K4-System](https://github.com/karola3vax/K4-System) and
+> [K4-Zenith](https://github.com/K4ryuu/K4-Zenith).
 
 ---
 
 ## ✨ Features
+
+All of them included in the Ranks plugin. There are also [Modules](#-modules) which add even more features.
 
 - 🏆 **Points and ranks** — a configurable ladder, priced per event, with VIP and dynamic multipliers
 - 📊 **Gameplay stats** — kills, deaths, assists, round and match results, bomb plants and defuses
@@ -48,7 +53,7 @@
 
 ## 🧩 Modules
 
-Four official modules ship alongside core. Adding one touches nothing in core.
+Official modules 
 
 | Module | Kind | What it adds |
 |--------|------|--------------|
@@ -73,11 +78,3 @@ Four official modules ship alongside core. Adding one touches nothing in core.
 ## 🤝 Report issues or request features
 
 - **Issues**: [GitHub Issues](https://github.com/shmitzas/Ranks/issues)
-
----
-
-<div align="center">
-<p>Made with ❤️ by Shmitzas</p>
-<p>To play in my CS2 servers go to <a href="https://rampage.lt">Rampage.lt</a></p>
-<p>⭐ Star this repository if you find it useful!</p>
-</div>
