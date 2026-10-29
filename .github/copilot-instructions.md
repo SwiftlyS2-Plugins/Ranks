@@ -1936,12 +1936,31 @@ inline task. The version lives in exactly one place; nothing else needs stamping
 
 `.github/workflows/release.yml` runs on `workflow_dispatch`, or on a push to `main`
 whose commit message contains `[release]`. It reads the same
-`PluginMetadata.Version`, refuses to overwrite an existing tag, takes the matching
-`## [x.y.z]` section of `CHANGELOG.md` as the release body, and uploads the zip.
+`PluginMetadata.Version`, takes the matching `## [x.y.z]` section of the component's
+`CHANGELOG.md` as the release body, and uploads the zip.
+
+**One run publishes every component that has something to publish.** The `target`
+input defaults to `all`: core and the four modules each get their own tag, notes and
+release, from a single build. Core and the modules version independently, so under
+`all` a component already published at its current version is **skipped with a
+notice** rather than failing the run — otherwise bumping one module would be blocked
+by the four that did not change. Naming a single component instead keeps the old
+behaviour and still **errors** on an existing tag, which is what makes an accidental
+re-release loud. A run where everything is already published is an error, not a
+silent success.
+
+Every component is validated before anything is built, so a version mismatch in one
+cannot leave the others already released. A core release additionally attaches the
+module zips built from the same commit, so an operator never has to work out which
+module zip goes with which core version.
 
 So a release needs **both** a version bump and a matching changelog section — a
 missing section fails the run by design. Style rules live in
 `.github/instructions/changelog.instructions.md`.
+
+`docs/verify-release-workflow.sh` runs that logic against the real repo with `gh`
+stubbed (`docker run --rm -v "${PWD}:/src:ro" debian:bookworm-slim`), which is the
+only way to exercise it without publishing something.
 
 ### Install layout
 
