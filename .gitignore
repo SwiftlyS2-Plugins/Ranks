@@ -441,4 +441,4 @@ Thumbs.db
 # Local wiki tooling. The wiki is a separate repo, so its verifier is not shipped here.
 # Deliberately not a blanket *.ps1 — Modules/Ranks_EloPoints/docs/verify-figures.ps1 is
 # tracked and linked from three of that module's docs.
-docs/verify-wiki.ps1
+*.ps1
