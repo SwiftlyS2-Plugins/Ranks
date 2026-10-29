@@ -191,6 +191,28 @@ cross-plugin cast inside `TryGetSharedInterface<T>`.
 
 The provider ships the contract DLL in `resources/exports/`.
 
+**A contract you publish is different from one you consume, and must also ship
+beside your own plugin DLL.** `PluginManager.LoadExports` runs exactly once, from
+`Initialize`, and snapshots every `plugins/*/resources/exports/*.dll` into
+`_sharedTypes`; `ReloadPluginByDllName` never re-runs it. So a module installed or
+updated on an already-running server has no shared copy of its own contract — and
+`FindPluginType` calls `Assembly.GetTypes()`, which resolves every TypeDef's
+interfaces, so the `*Api : I*Api` class alone fails the **whole plugin** before
+`Load` runs:
+
+```
+ReflectionTypeLoadException: Could not load file or assembly 'Ranks_EloPoints.Contract'
+   at PluginManager.FindPluginType(PluginLoader loader)
+```
+
+No amount of `[NoInlining]` helps — `GetTypes()` walks type definitions, not
+method bodies. Copy the contract to `$(OutDir)` / `$(PublishDir)` as well as to
+`resources/exports`; the local copy is only the loader's base-path fallback for
+that window, and because SwiftlyS2 sets `PreferSharedTypes = true` the shared copy
+still wins whenever it exists, so this cannot split the identity. This applies
+only to a contract the module itself publishes — never copy `Ranks.Contract`,
+which core publishes and every module consumes.
+
 > **Do not add `resources/exports` to a static `<Content Include>` glob.** Item
 > globs are evaluated during project evaluation, *before* any target runs, so a
 > build-generated contract DLL is not on disk yet. It works on a dev machine (a

@@ -195,7 +195,8 @@ returns every row.
 The module publishes `Ranks.WeaponStats.Api.v1`. Reference
 `Ranks_WeaponStats.Contract.dll` from this module's `resources/exports/` — **do not
 copy it next to your plugin**, or the host loads a second one, the interface gets two
-type identities, and binding silently stops matching.
+type identities, and binding silently stops matching. (The copy beside
+`Ranks_WeaponStats.dll` is this module's own load-time fallback — ignore it.)
 
 ```csharp
 public interface IWeaponStatsApi
