@@ -50,7 +50,14 @@
 
   <!-- Resolved inside a target rather than an item glob: the contract DLL does not exist during
        project evaluation, so a glob ships nothing from a clean checkout and fails only at runtime
-       with a ReflectionTypeLoadException. -->
+       with a ReflectionTypeLoadException.
+
+       Shipped to BOTH resources/exports and next to the plugin DLL. Exports is what gives every
+       plugin one shared IEloPointsApi identity, but SwiftlyS2 snapshots exports once in
+       PluginManager.Initialize and never rescans, so a module installed on an already-running
+       server has none — and FindPluginType's GetTypes() then cannot resolve the interface
+       EloPointsApi implements, failing the whole plugin before Load runs. PreferSharedTypes keeps
+       the shared copy winning whenever it exists, so the local fallback cannot split the identity. -->
   <Target Name="CopyContract" AfterTargets="Build">
     <PropertyGroup>
       <_ApiContractDll>$(MSBuildThisFileDirectory)Ranks_EloPoints.Contract/build/$(TargetFramework)/Ranks_EloPoints.Contract.dll</_ApiContractDll>
@@ -58,6 +65,7 @@
     <Error Condition="!Exists('$(_ApiContractDll)')"
            Text="CopyContract: $(_ApiContractDll) is missing. Build Ranks_EloPoints.Contract first." />
     <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(OutDir)resources/exports" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyContractToPublish" AfterTargets="Publish">
@@ -67,6 +75,7 @@
     <Error Condition="!Exists('$(_ApiContractDll)')"
            Text="CopyContractToPublish: $(_ApiContractDll) is missing. Build Ranks_EloPoints.Contract first." />
     <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(PublishDir)resources/exports" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_ApiContractDll)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <UsingTask TaskName="ExtractPluginVersion"

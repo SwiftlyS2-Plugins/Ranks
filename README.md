@@ -12,11 +12,12 @@
 
 > [!NOTE]
 > **Migrating from another ranking plugin?** [Ranks_Importer](https://github.com/shmitzas/PluginDataImporters)
-> is a separate one-shot tool that imports from [LVL Ranks](https://github.com/Pisex/cs2-lvl_ranks),
-> [K4-LevelRanks-SwiftlyS2](https://github.com/K4ryuu/K4-LevelRanks-SwiftlyS2),
-> [K4-LevelRanks-Upkeep](https://github.com/shmitzas/K4-LevelRanks-Upkeep),
-> [K4-System](https://github.com/karola3vax/K4-System) and
-> [K4-Zenith](https://github.com/K4ryuu/K4-Zenith).
+> is a separate one-shot tool that imports from:
+> - **[LVL Ranks](https://github.com/Pisex/cs2-lvl_ranks)** - by [Pisex](https://github.com/Pisex) — the original, plus its [modules](https://github.com/Pisex/cs2-lvl_ranks_modules)
+> - **[K4-LevelRanks-SwiftlyS2](https://github.com/K4ryuu/K4-LevelRanks-SwiftlyS2)** - by [K4ryuu](https://github.com/K4ryuu) — now archived
+> - **[K4-LevelRanks-Upkeep](https://github.com/shmitzas/K4-LevelRanks-Upkeep)** - by [shmitzas](https://github.com/shmitzas) — the maintained fork, with minimal changes to original fork
+> - **[K4-System](https://github.com/karola3vax/K4-System)** - by [karola3vax](https://github.com/karola3vax) — a rewrite of K4ryuu's original
+> - **[K4-Zenith](https://github.com/K4ryuu/K4-Zenith)** - by [K4ryuu](https://github.com/K4ryuu) — its Ranks and Stats modules
 
 ---
 
