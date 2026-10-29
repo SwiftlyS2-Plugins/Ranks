@@ -545,6 +545,11 @@ three modules and gets away with it only by hand-coordinating migration IDs into
 one sequence across three folders. A colliding third-party ID is then recorded
 as applied and its table is **never created**, silently. See FR-DB-05.
 
+Core avoids that: `TableNames.LedgerFor(pluginId)` gives every module its own
+`AffixedVersionTable`, so **migration IDs only need to be unique within a module**
+and two modules may share one. `Ranks_EloPoints` and `Ranks_CustomCombos` both use
+`202610261200` today, which is fine and is not something to "fix".
+
 ### ⚠️ Dommel's table-name resolver is process-wide
 
 `[Table("…")]` is compile-time, so prefix support means
@@ -1345,6 +1350,13 @@ binds for one menu silently apply to the other.**
 `AddHeader` after the title, `AddFooter` before `Build()` — which separates the
 body from the title above and the key hints below.
 
+Counting the two calls is **not** a way to check this. A builder with several
+early returns — `PrestigeMenus.Build` is the one here — calls `AddHeader` once on
+the shared builder and then `AddFooter` on each branch, so the file reads 1 header
+against 3 footers and 3 builds while every menu it produces still renders exactly
+one of each. Only one branch runs per call. Read the branches before believing a
+count.
+
 ### Components
 
 Don't hand-roll a widget out of `ButtonComponent`:
@@ -1660,6 +1672,8 @@ change could have affected.
 | `PagedCollectionComponent<TItem>` | `TItem` is the **row type**, and the text comes from `Formatter` | The default formatter is `ToString()`, so passing `IMenuComponent` items compiles, runs, pages correctly — and draws `SwiftlyS2.Shared.Menu.Components.TextComponent` on every line. Shipped that way in the leaderboard and all three module menus |
 | Menu row width | A row is one centred line and clips at roughly **42 characters** | Both ends are cut off with no ellipsis, so a too-long row looks like corrupted text rather than a layout problem. Sentences go to chat |
 | `IMenu.Parent` | A menu opened from a **row handler** must have `Parent` set by hand | Adoption only happens for a menu a `SubmenuComponent` opened. From `OnItemSelected` the child opens fine and looks right — the break only shows when the player presses back and the whole tree closes |
+| Bridge calls from event paths | Anything reachable from a `[GameEventHandler]`, a `Registrator` registration or a scheduler callback must check `_bridge.IsAvailable` before touching the bridge | `IsAvailable` is a plain bool and resolves nothing; every other bridge member names a contract type, so with no Ranks installed the CLR fails to JIT it and throws into the *caller's* frame — a game-event or `NextTick` body, where nothing catches it. WeaponStats avoids this structurally by keeping its collector contract-free; a module whose tracker calls the bridge needs the guard instead |
+| Module idle warning | Report absence from `OnAllPluginsLoaded`, never from the `UseSharedInterface` / `OnSharedInterfaceInjected` path | That handshake re-runs on every plugin load and unload, so warning there repeats once per rebuild rather than once per load cycle |
 | Menu handler threading | A handler that calls a **thread-unsafe** API (`SendChat`, scoreboard/controller writes) goes through `RankMenus.OnGameThread` | A handler is not guaranteed to run on the game thread. The classic menu API dispatched every click on the thread pool and took a production server down that way; `Core.IsGameThread` + `Scheduler.NextTick` settles it without needing to know which. Framework calls like `IMenu.Open` are *not* in this class and are left alone |
 
 ### Where checking belongs instead

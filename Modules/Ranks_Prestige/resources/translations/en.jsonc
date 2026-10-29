@@ -6,9 +6,10 @@
   "error.unavailable": "Prestige data is not available yet. Try again in a moment.",
 
   "prestige.disabled": "Prestige is currently disabled on this server.",
-  "prestige.none": "You have not reached the first prestige yet.",
-  "prestige.current": "Prestige {0} — showing {1} points.",
-  "prestige.next": "{0} more points to the next prestige.",
+  // {0} is the level the player's CURRENT points reach. Points can fall, so this can fall too.
+  "prestige.level": "Highest level reached: {0}",
+  // {0} stored points, {1} the next level's threshold — both absolute, not per-level.
+  "prestige.next": "Next level: {0}/{1}",
   "prestige.max": "You have reached the highest prestige.",
 
   // Doubles as the label core shows under its Statistics menu, so renaming it renames that row.

@@ -47,12 +47,10 @@ internal sealed class PrestigeMenus
         if (!_bridge.IsAvailable || _bridge.StandingFor(player) is not { } standing)
             return builder.Add(new TextComponent(_core.Localizer["error.unavailable"])).AddFooter(new DividerComponent()).Build();
 
-        builder.Add(new TextComponent(standing.Level == 0
-            ? _core.Localizer["prestige.none"]
-            : _core.Localizer["prestige.current", standing.Level, standing.DisplayPoints]));
+        builder.Add(new TextComponent(_core.Localizer["prestige.level", standing.Level]));
 
-        builder.Add(new TextComponent(_bridge.PointsToNextFor(player) is { } remaining
-            ? _core.Localizer["prestige.next", remaining]
+        builder.Add(new TextComponent(_bridge.ProgressToNextFor(player) is { } progress
+            ? _core.Localizer["prestige.next", progress.Current, progress.Required]
             : _core.Localizer["prestige.max"]));
 
         return builder.AddFooter(new DividerComponent()).Build();

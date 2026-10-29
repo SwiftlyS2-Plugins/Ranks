@@ -40,5 +40,7 @@
   "hitgroup.special": "Special",
   "hitgroup.unknown": "Hitbox {0}",
 
+  // Looked up as command.<name>.help, where <name> is the Command in commands.jsonc — rename the
+  // command there and this key has to follow it.
   "command.weaponstats.help": "Show your per-weapon kills, accuracy and headshot rate."
 }

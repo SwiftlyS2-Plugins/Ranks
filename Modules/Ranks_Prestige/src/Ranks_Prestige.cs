@@ -84,13 +84,22 @@ public sealed class RanksPrestige : BasePlugin
     {
         try
         {
-            if (_bridge.TryAcquire(interfaceManager)) return;
+            _bridge.TryAcquire(interfaceManager);
         }
         catch (Exception ex)
         {
             _contractLoadFailed = true;
             _logger.LogDebug(ex, "Ranks_Prestige: the Ranks contract could not be loaded.");
         }
+    }
+
+    /// <remarks>
+    /// Absence is reported from here, not from Acquire: the handshake re-runs on every plugin
+    /// load and unload, so warning there repeats once per rebuild.
+    /// </remarks>
+    public override void OnAllPluginsLoaded()
+    {
+        if (_bridge.IsAvailable) return;
 
         // Two different faults with one symptom: core absent, or present but its contract
         // unloadable from here. Saying "not present" for the second sends the operator looking
@@ -139,7 +148,7 @@ public sealed class RanksPrestige : BasePlugin
 
             _config = incoming;
             _commands?.UpdateConfig(incoming);
-        _menus?.UpdateConfig(incoming);
+            _menus?.UpdateConfig(incoming);
             _bridge?.UpdateLadder(PrestigeLadder.Build(incoming, _logger), incoming);
         });
     }

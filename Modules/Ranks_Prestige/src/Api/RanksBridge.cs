@@ -74,11 +74,11 @@ internal sealed class RanksBridge
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public int? PointsToNextFor(IPlayer player)
+    public (int Current, int Required)? ProgressToNextFor(IPlayer player)
     {
         if (_api is not IRanksApi api || !api.IsLoaded(player)) return null;
 
-        return _ladder.PointsToNext(api.GetPoints(player));
+        return _ladder.ProgressToNext(api.GetPoints(player));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -179,19 +179,29 @@ internal sealed class PrestigeModule : RanksModuleBase
 
     /// <remarks>
     /// The label is this module's own translation — core ships no key for a screen it does not
-    /// know exists.
+    /// know exists. The overlay pass covers a hot reload: core does not replay PlayerDataLoaded
+    /// for players who were already resident, so without it they carry no prefix until their
+    /// points next move.
     /// </remarks>
-    protected override void OnCoreReady() =>
+    protected override void OnCoreReady()
+    {
         RegisterMenuEntry(RanksMenuSections.Statistics, Core.Localizer["menu.prestige.title"], _menus.Build, order: 40);
+        ApplyEveryone();
+    }
+
+    public void ApplyEveryone()
+    {
+        foreach (var player in Core.PlayerManager.GetAllPlayers())
+            if (!player.IsFakeClient)
+                ApplyTo(player);
+    }
 
     public void Refresh(PrestigeLadder ladder, PrestigeConfig config)
     {
         _ladder = ladder;
         _config = config;
 
-        foreach (var player in Core.PlayerManager.GetAllPlayers())
-            if (!player.IsFakeClient)
-                ApplyTo(player);
+        ApplyEveryone();
     }
 
     public void ClearEveryone()

@@ -88,11 +88,11 @@ internal sealed class PrestigeLadder
             reached.RankMode ?? string.Empty);
     }
 
-    /// <summary>Stored points still needed for the next level, or null at the top.</summary>
-    public int? PointsToNext(int points)
+    /// <summary>Stored points against the next level's threshold, or null at the top.</summary>
+    public (int Current, int Required)? ProgressToNext(int points)
     {
         foreach (var level in _levels)
-            if (points < level.MinimumPoints) return level.MinimumPoints - points;
+            if (points < level.MinimumPoints) return (points, level.MinimumPoints);
 
         return null;
     }

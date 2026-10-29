@@ -42,7 +42,11 @@ core already stores.
 
 | Command | Aliases | Permission | Description |
 |---------|---------|------------|-------------|
-| `!prestige` | `!myprestige` | None | Your prestige level and points to the next one |
+| `!prestige` | `!myprestige` | None | Your prestige level and progress toward the next one |
+
+Two lines: the level your current points reach, and those points against the next
+level's threshold (`Next level: 1234/4000`). Both are absolute totals, not per-level —
+the scoreboard overlay is the one place a threshold is subtracted.
 
 Name, aliases and permission are editable in `commands.jsonc`. An empty `Command` removes it.
 

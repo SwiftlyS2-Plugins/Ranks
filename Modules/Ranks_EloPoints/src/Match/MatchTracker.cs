@@ -51,6 +51,10 @@ internal sealed class MatchTracker
     {
         if (player.IsFakeClient || player.SteamID == 0) return;
 
+        // IsAvailable is a plain bool, so reading it resolves nothing. The rating lookup below
+        // reaches the bridge, which names a contract type and would throw here with no Ranks.
+        if (!_bridge.IsAvailable) return;
+
         // Rejoining resumes the existing session rather than replacing it: that is what makes a
         // reconnect invisible to the rating.
         if (_sessions.TryGetValue(player.SteamID, out var existing))
@@ -125,7 +129,7 @@ internal sealed class MatchTracker
             session.SumActual = 0;
             session.SumExpected = 0;
             session.LastTeam = 0;
-            session.StartCounters = _bridge.GetCounters(steamId);
+            session.StartCounters = _bridge.IsAvailable ? _bridge.GetCounters(steamId) : null;
         }
 
         _lastRoundsPlayed = 0;
@@ -148,6 +152,7 @@ internal sealed class MatchTracker
 
     private void AccrueRound(int winner)
     {
+        if (!_bridge.IsAvailable) return;
         if (_bridge.GetSettings() is not { } settings) return;
         if (!TryReadMatch(out var match)) return;
 
@@ -221,6 +226,7 @@ internal sealed class MatchTracker
     /// <summary>Settles the match once. Idempotent, so the event and the phase backstop may both fire.</summary>
     public void Settle()
     {
+        if (!_bridge.IsAvailable) return;
         if (_settled) return;
         _settled = true;
 

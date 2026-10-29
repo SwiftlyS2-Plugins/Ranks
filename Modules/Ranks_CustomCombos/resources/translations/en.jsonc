@@ -7,6 +7,8 @@
   // Keys named combo.<key> are YOURS to add — one per combo you configure. A combo with no key
   // here still works; its chat line falls back to the bare combo name.
 
+  // Looked up as command.<name>.help, where <name> is the Command in commands.jsonc — rename the
+  // command there and this key has to follow it.
   "command.combos.help": "Shows the combos you have landed.",
 
   // ---- Menu ---------------------------------------------------------------
