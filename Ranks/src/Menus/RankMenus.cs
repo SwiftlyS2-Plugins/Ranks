@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Ranks.Api;
+using Ranks.Config;
 using Ranks.Contract;
+using Ranks.Database;
 using Ranks.Players;
 using Ranks.Ranking;
 using SwiftlyS2.Shared;
@@ -31,6 +33,8 @@ internal sealed class RankMenus
     private readonly ISwiftlyCore _core;
     private readonly RankLadder _ladder;
     private readonly PlayerRegistry _registry;
+    private readonly PlayerStore _store;
+    private readonly ConfigHost<CommandsConfig> _commands;
     private readonly PlayerReset _reset;
     private readonly MenuEntryRegistry _entries;
     private readonly RanksApi _api;
@@ -40,6 +44,8 @@ internal sealed class RankMenus
         ISwiftlyCore core,
         RankLadder ladder,
         PlayerRegistry registry,
+        PlayerStore store,
+        ConfigHost<CommandsConfig> commands,
         PlayerReset reset,
         MenuEntryRegistry entries,
         RanksApi api,
@@ -48,6 +54,8 @@ internal sealed class RankMenus
         _core = core;
         _ladder = ladder;
         _registry = registry;
+        _store = store;
+        _commands = commands;
         _reset = reset;
         _entries = entries;
         _api = api;
@@ -63,8 +71,9 @@ internal sealed class RankMenus
 
         // Ids are namespaced because a menu id doubles as its keybind configuration scope, which
         // keeps the server's generated keybind file readable. Each one names what it shows.
-        _core.Menu.CreateMenu("ranks.root")
+        var builder = _core.Menu.CreateMenu("ranks.root")
             .WithTitle(_core.Localizer["menu.root.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new SubmenuComponent(_core.Localizer["menu.root.rank"], _ => BuildMyRank(player)))
             .Add(new SubmenuComponent(_core.Localizer["menu.root.stats"], _ => BuildStatistics(player)))
@@ -72,12 +81,23 @@ internal sealed class RankMenus
             .Add(new SubmenuComponent(_core.Localizer["menu.root.settings"], _ => BuildSettings(player)))
             .Add(new ButtonComponent(_core.Localizer["menu.root.help"], ctx =>
             {
-                SendHelp(player);
+                OnGameThread(() => SendHelp(player));
                 ctx.Session.Close();
                 return ValueTask.CompletedTask;
-            }))
-            .Build()
-            .Open(player);
+            }));
+
+        // Last, and only for someone who can actually run at least one of them.
+        if (AdminCommands.Any(key => CanRun(key, player, out _)))
+        {
+            builder.Add(new ButtonComponent(_core.Localizer["menu.root.admin"], ctx =>
+            {
+                OnGameThread(() => SendAdminHelp(player));
+                ctx.Session.Close();
+                return ValueTask.CompletedTask;
+            }));
+        }
+
+        builder.AddFooter(new DividerComponent()).Build().Open(player);
     }
 
     public void OpenStatistics(IPlayer player)
@@ -110,6 +130,7 @@ internal sealed class RankMenus
 
         return _core.Menu.CreateMenu("ranks.myrank")
             .WithTitle(_core.Localizer["menu.rank.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new TextComponent(_core.Localizer["menu.rank.current", tier.Name]))
             .Add(new TextComponent(_core.Localizer["menu.rank.XP", record.Points]))
@@ -120,6 +141,7 @@ internal sealed class RankMenus
                 _ => progress,
                 multiLine: false))
             .Add(new SubmenuComponent(_core.Localizer["menu.rank.ladder"], _ => BuildLadder(player)))
+            .AddFooter(new DividerComponent())
             .Build();
     }
 
@@ -129,6 +151,7 @@ internal sealed class RankMenus
 
         var builder = _core.Menu.CreateMenu("ranks.ladder")
             .WithTitle(_core.Localizer["menu.ladder.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8);
 
         var tiers = _ladder.Tiers;
@@ -139,7 +162,7 @@ internal sealed class RankMenus
             builder.Add(new TextComponent(_core.Localizer[key, tiers[i].Name, tiers[i].Points]));
         }
 
-        return builder.Build();
+        return builder.AddFooter(new DividerComponent()).Build();
     }
 
     // ---- Statistics ----------------------------------------------------------
@@ -151,6 +174,7 @@ internal sealed class RankMenus
 
         var builder = _core.Menu.CreateMenu("ranks.stats")
             .WithTitle(_core.Localizer["menu.stats.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new SubmenuComponent(_core.Localizer["menu.stats.main"], _ => BuildMainStats(player)));
 
@@ -163,13 +187,27 @@ internal sealed class RankMenus
         if (entries.Count == 0)
             builder.Add(new TextComponent(_core.Localizer["menu.stats.modules_empty"]));
 
-        return builder.Build();
+        return builder.AddFooter(new DividerComponent()).Build();
     }
 
     private IMenu? BuildMainStats(IPlayer player)
     {
         if (_registry.BySlot(player.Slot) is not { } record) return null;
 
+        var builder = _core.Menu.CreateMenu("ranks.stats.main")
+            .WithTitle(_core.Localizer["menu.stats.main_title"])
+            .AddHeader(new DividerComponent())
+            .WithItemsPerPage(9);
+
+        foreach (var line in StatLines(record))
+            builder.Add(new TextComponent(line));
+
+        return builder.AddFooter(new DividerComponent()).Build();
+    }
+
+    /// <summary>The counter lines, shared so a player's own menu and a leaderboard pick agree.</summary>
+    private List<string> StatLines(PlayerRecord record)
+    {
         var kd = record.Deaths == 0 ? record.Kills : Math.Round(record.Kills / (double)record.Deaths, 2);
         var headshotRate = record.Kills == 0 ? 0 : Math.Round(record.Headshots * 100.0 / record.Kills, 1);
 
@@ -178,19 +216,18 @@ internal sealed class RankMenus
         var attempts = record.Hits + record.Misses;
         var accuracy = attempts == 0 ? 0 : Math.Round(record.Hits * 100.0 / attempts, 1);
 
-        return _core.Menu.CreateMenu("ranks.stats.main")
-            .WithTitle(_core.Localizer["menu.stats.main_title"])
-            .WithItemsPerPage(9)
-            .Add(new TextComponent(_core.Localizer["menu.stats.kills", record.Kills]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.deaths", record.Deaths]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.kd", kd]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.assists", record.Assists]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.headshots", record.Headshots, headshotRate]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.accuracy", accuracy, record.Hits, record.Misses]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.rounds", record.RoundWins, record.RoundLosses]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.matches", record.MatchWins, record.MatchLosses]))
-            .Add(new TextComponent(_core.Localizer["menu.stats.bombs", record.BombsPlanted, record.BombsDefused]))
-            .Build();
+        return
+        [
+            _core.Localizer["menu.stats.kills", record.Kills],
+            _core.Localizer["menu.stats.deaths", record.Deaths],
+            _core.Localizer["menu.stats.kd", kd],
+            _core.Localizer["menu.stats.assists", record.Assists],
+            _core.Localizer["menu.stats.headshots", record.Headshots, headshotRate],
+            _core.Localizer["menu.stats.accuracy", accuracy, record.Hits, record.Misses],
+            _core.Localizer["menu.stats.rounds", record.RoundWins, record.RoundLosses],
+            _core.Localizer["menu.stats.matches", record.MatchWins, record.MatchLosses],
+            _core.Localizer["menu.stats.bombs", record.BombsPlanted, record.BombsDefused],
+        ];
     }
 
     // ---- Leaderboard ---------------------------------------------------------
@@ -204,6 +241,7 @@ internal sealed class RankMenus
     private IMenu BuildTop() =>
         _core.Menu.CreateMenu("ranks.top")
             .WithTitle(_core.Localizer["menu.top.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(10)
             .Add(new PagedCollectionComponent<RanksLeaderboardEntry>(async () =>
             {
@@ -220,9 +258,59 @@ internal sealed class RankMenus
             })
             {
                 Formatter = e => _core.Localizer["menu.top.row", e.Position, e.Name, e.Value],
+                ItemHint = _ => _core.Localizer["menu.top.hint"],
+                OnItemSelected = ctx =>
+                {
+                    var child = BuildPlayerStats(ctx.Item.SteamId, ctx.Item.Name);
+
+                    // Set explicitly: adoption only happens for a menu a SubmenuComponent opens,
+                    // and this one is opened from a row handler, so without it the back key would
+                    // close the tree instead of returning to the leaderboard.
+                    child.Parent = ctx.Session.Menu;
+                    child.Open(ctx.Player);
+                },
                 EmptyText = _core.Localizer["menu.top.empty"],
                 FailedText = _core.Localizer["menu.top.error"],
             })
+            .AddFooter(new DividerComponent())
+            .Build();
+
+    /// <summary>Another player's counters, opened from a leaderboard row.</summary>
+    /// <remarks>
+    /// Paged rather than plain text because the record has to be fetched: a listed player is
+    /// usually offline, so the resident registry has nothing and the row comes from the database.
+    /// <c>PagedCollectionComponent</c> is what owns that load, its thread and its failure text.
+    ///
+    /// Module sections are deliberately absent — a module's menu factory takes the viewing
+    /// <c>IPlayer</c>, so it can only ever render the viewer's own numbers (FR-CMD-04).
+    /// </remarks>
+    private IMenu BuildPlayerStats(ulong steamId, string name) =>
+        _core.Menu.CreateMenu("ranks.top.player")
+            .WithTitle(_core.Localizer["menu.playerstats.title", name])
+            .AddHeader(new DividerComponent())
+            .WithItemsPerPage(9)
+            .Add(new PagedCollectionComponent<string>(async () =>
+            {
+                try
+                {
+                    // Resident first so an online player shows the same figures as their own
+                    // menu; the store is the fallback and the only source for anyone offline.
+                    var record = _registry.BySteamId(steamId)
+                                 ?? await Task.Run(() => _store.Load(steamId)).ConfigureAwait(false);
+
+                    return record is null ? [] : StatLines(record);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Ranks: failed to load statistics for {SteamId}.", steamId);
+                    throw;
+                }
+            })
+            {
+                EmptyText = _core.Localizer["menu.playerstats.empty"],
+                FailedText = _core.Localizer["menu.top.error"],
+            })
+            .AddFooter(new DividerComponent())
             .Build();
 
     // ---- Settings ------------------------------------------------------------
@@ -233,6 +321,7 @@ internal sealed class RankMenus
 
         var builder = _core.Menu.CreateMenu("ranks.settings")
             .WithTitle(_core.Localizer["menu.settings.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new ToggleComponent(
                 _core.Localizer["menu.settings.XP_messages"],
@@ -249,40 +338,117 @@ internal sealed class RankMenus
         // Last, and behind its own screen: the only destructive row in the tree.
         builder.Add(new SubmenuComponent(_core.Localizer["menu.settings.reset"], _ => BuildResetConfirm(player)));
 
-        return builder.Build();
+        return builder.AddFooter(new DividerComponent()).Build();
     }
 
     private IMenu BuildResetConfirm(IPlayer player) =>
         _core.Menu.CreateMenu("ranks.settings.reset")
             .WithTitle(_core.Localizer["menu.settings.reset_title"])
+            .AddHeader(new DividerComponent())
             .Add(new TextComponent(_core.Localizer["menu.settings.reset_warning"]))
             .Add(new ButtonComponent(_core.Localizer["menu.settings.reset_confirm"], ctx =>
             {
-                if (_registry.BySlot(player.Slot) is { } record)
+                OnGameThread(() =>
                 {
-                    _reset.Apply(record);
-                    Chat.Send(_core, player, "reset.done");
-                }
-
+                    if (_registry.BySlot(player.Slot) is { } record)
+                    {
+                        _reset.Apply(record);
+                        Chat.Send(_core, player, "reset.done");
+                    }
+                });
                 // Closed rather than left open: every screen behind this one still shows the old
                 // numbers, and staying on a confirm button invites a second press.
                 ctx.Session.Close();
                 return ValueTask.CompletedTask;
             }))
+            .AddFooter(new DividerComponent())
             .Build();
 
     // ---- Help ----------------------------------------------------------------
 
+    /// <summary>The commands this server actually has, one line each.</summary>
     /// <remarks>
-    /// Chat, not a menu: these are full sentences, and a menu row is a single centred line that
-    /// clips well before one ends. Closing the menu is what makes the chat readable.
+    /// Chat, not a menu: a menu row is a single centred line that clips well before one of these
+    /// ends. Closing the menu is what makes the chat readable.
+    ///
+    /// Names come from <c>commands.jsonc</c> rather than the translation, so a renamed or removed
+    /// command is described correctly instead of advertising one that does not exist.
     /// </remarks>
     private void SendHelp(IPlayer player)
     {
-        Chat.Send(_core, player, "help.points");
-        Chat.Send(_core, player, "help.ranks");
-        Chat.Send(_core, player, "help.stats");
-        Chat.Send(_core, player, "help.scoreboard");
-        Chat.Send(_core, player, "help.commands");
+        Chat.Send(_core, player, "help.header");
+
+        // Listed in reading order — the root menu first, then the shortcuts into it. Each key is
+        // spelled out rather than interpolated so the translation checker can see it is reachable.
+        Line(CommandsConfig.Rank, name => _core.Localizer["help.rank", name]);
+        Line(CommandsConfig.Stats, name => _core.Localizer["help.stats", name]);
+        Line(CommandsConfig.Ranks, name => _core.Localizer["help.ranks", name]);
+        Line(CommandsConfig.Top, name => _core.Localizer["help.top", name]);
+        Line(CommandsConfig.ResetMyRank, name => _core.Localizer["help.resetmyrank", name]);
+
+        void Line(string configKey, Func<string, string> format)
+        {
+            if (!CanRun(configKey, player, out var name)) return;
+
+            Chat.SendRaw(_core, player, format(name));
+        }
+    }
+
+    /// <summary>The admin half, behind the same per-command permission the command itself carries.</summary>
+    private void SendAdminHelp(IPlayer player)
+    {
+        Chat.Send(_core, player, "help.admin_header");
+
+        Line(CommandsConfig.SetPoints, name => _core.Localizer["help.setpoints", name]);
+        Line(CommandsConfig.GivePoints, name => _core.Localizer["help.givepoints", name]);
+        Line(CommandsConfig.RemovePoints, name => _core.Localizer["help.removepoints", name]);
+        Line(CommandsConfig.ResetRank, name => _core.Localizer["help.resetrank", name]);
+
+        void Line(string configKey, Func<string, string> format)
+        {
+            if (!CanRun(configKey, player, out var name)) return;
+
+            Chat.SendRaw(_core, player, format(name));
+        }
+    }
+
+    private static readonly string[] AdminCommands =
+    [
+        CommandsConfig.SetPoints,
+        CommandsConfig.GivePoints,
+        CommandsConfig.RemovePoints,
+        CommandsConfig.ResetRank,
+    ];
+
+    /// <summary>Whether this server has the command at all, and whether this player may run it.</summary>
+    /// <remarks>
+    /// The same two tests registration makes — an empty name means the operator removed the
+    /// command, an empty permission means everyone — so help never advertises a command that
+    /// would be refused or does not exist.
+    /// </remarks>
+    private bool CanRun(string configKey, IPlayer player, out string name)
+    {
+        name = string.Empty;
+
+        if (!_commands.Current.All.TryGetValue(configKey, out var definition)) return false;
+        if (string.IsNullOrWhiteSpace(definition.Command)) return false;
+
+        if (!string.IsNullOrWhiteSpace(definition.Permission)
+            && !_core.Permission.PlayerHasPermission(player.SteamID, definition.Permission))
+            return false;
+
+        name = definition.Command;
+        return true;
+    }
+
+    /// <remarks>
+    /// A menu handler is not guaranteed to run on the game thread, and chat writes and scoreboard
+    /// updates are both documented thread-unsafe — calling them from a handler directly is the
+    /// crash class that took a production server down through the classic menu API.
+    /// </remarks>
+    private void OnGameThread(Action action)
+    {
+        if (_core.IsGameThread) action();
+        else _core.Scheduler.NextTick(action);
     }
 }

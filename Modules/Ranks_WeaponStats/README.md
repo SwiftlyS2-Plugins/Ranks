@@ -48,9 +48,10 @@ Name, aliases and permission are editable in `commands.jsonc`. An empty `Command
 removes the command. It is module-owned and does not appear in core's `!rank` menu.
 
 > [!NOTE]
-> **Hitgroup totals have no command.** They are collected and stored, and reachable
-> through `GetHitGroupsAsync` on the published API, but nothing in this module prints
-> them in chat.
+> **Hitgroup totals have no command.** They are reachable from the menu — **Overall
+> Hit Stats** under `!rank` → Statistics, and per weapon by selecting a row in the
+> weapon list — and through `GetHitGroupsAsync` / `GetWeaponHitGroupsAsync` on the
+> published API, but nothing prints them in chat.
 
 ---
 

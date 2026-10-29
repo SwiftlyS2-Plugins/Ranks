@@ -55,6 +55,7 @@ internal sealed class WeaponStatsMenus
 
         return _core.Menu.CreateMenu("weaponstats.weapons")
             .WithTitle(_core.Localizer["menu.weapons.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new PagedCollectionComponent<WeaponStatRow>(async () =>
             {
@@ -83,33 +84,69 @@ internal sealed class WeaponStatsMenus
                     "menu.weapons.row",
                     Display(r.Weapon),
                     r.Kills,
-                    Percent(r.Hits, r.Hits + r.Misses),
-                    Percent(r.Headshots, r.Kills)],
+                    Percent(r.Headshots, r.Kills),
+                    Percent(r.Hits, r.Hits + r.Misses)],
+                ItemHint = _ => _core.Localizer["menu.weapons.hint"],
+                OnItemSelected = ctx =>
+                {
+                    var child = BuildWeaponHitGroups(ctx.Player, ctx.Item.Weapon);
+
+                    // Set explicitly: adoption only happens for a menu a SubmenuComponent opens,
+                    // and this one is opened from a row handler, so without it the back key would
+                    // close the tree instead of returning to the weapon list.
+                    child.Parent = ctx.Session.Menu;
+                    child.Open(ctx.Player);
+                },
                 EmptyText = _core.Localizer["menu.weapons.empty"],
                 FailedText = _core.Localizer["menu.error"],
             })
+            .AddFooter(new DividerComponent())
             .Build();
     }
 
-    /// <summary>Where the player's landed hits went, by hitbox.</summary>
-    public IMenu BuildHitGroups(IPlayer player)
-    {
-        var steamId = player.SteamID;
+    /// <summary>Where every landed hit went, across all weapons.</summary>
+    public IMenu BuildHitGroups(IPlayer player) =>
+        BuildHitGroupMenu(
+            "weaponstats.hitgroups",
+            _core.Localizer["menu.hitgroups.title"],
+            player.SteamID,
+            weapon: null);
 
-        return _core.Menu.CreateMenu("weaponstats.hitgroups")
-            .WithTitle(_core.Localizer["menu.hitgroups.title"])
+    /// <summary>The same breakdown for one weapon, opened from a row of the weapon list.</summary>
+    private IMenu BuildWeaponHitGroups(IPlayer player, string weapon) =>
+        BuildHitGroupMenu(
+            // Per-weapon id so a server owner can rebind or restyle the drill-down on its own;
+            // the weapon is not in the id, or every gun would be a separate config scope.
+            "weaponstats.weaponhitgroups",
+            _core.Localizer["menu.weaponhits.title", Display(weapon)],
+            player.SteamID,
+            weapon);
+
+    private IMenu BuildHitGroupMenu(string menuId, string title, ulong steamId, string? weapon) =>
+        _core.Menu.CreateMenu(menuId)
+            .WithTitle(title)
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new PagedCollectionComponent<HitRow>(async () =>
             {
                 try
                 {
-                    var rows = await _api.GetHitGroupsAsync(steamId).ConfigureAwait(false);
+                    // One weapon's rows come from the per-weapon table rather than by filtering
+                    // the overall one, which carries no weapon to filter on.
+                    var rows = weapon is null
+                        ? (await _api.GetHitGroupsAsync(steamId).ConfigureAwait(false))
+                            .Select(r => (r.HitGroup, r.Hits, r.Damage))
+                        : (await _api.GetWeaponHitGroupsAsync(steamId).ConfigureAwait(false))
+                            .Where(r => string.Equals(r.Weapon, weapon, StringComparison.OrdinalIgnoreCase))
+                            .Select(r => (r.HitGroup, r.Hits, r.Damage));
+
+                    var listed = rows.ToList();
 
                     // Share is projected here rather than formatted later: the formatter sees one
                     // row at a time and cannot know the total.
-                    var total = rows.Sum(r => r.Hits);
+                    var total = listed.Sum(r => r.Hits);
 
-                    return rows
+                    return listed
                         .OrderByDescending(r => r.Hits)
                         .Select(r => new HitRow(HitGroupName(r.HitGroup), r.Hits, Percent(r.Hits, total), r.Damage))
                         .ToList();
@@ -125,19 +162,20 @@ internal sealed class WeaponStatsMenus
                 EmptyText = _core.Localizer["menu.hitgroups.empty"],
                 FailedText = _core.Localizer["menu.error"],
             })
+            .AddFooter(new DividerComponent())
             .Build();
-    }
 
     private readonly record struct HitRow(string Name, long Hits, double Share, long Damage);
 
     private static double Percent(long part, long whole) => whole == 0 ? 0 : Math.Round(part * 100.0 / whole, 1);
 
     /// <remarks>
-    /// Strips the stored designer-name prefix for display only. The stored form stays
-    /// <c>weapon_ak47</c>, which is what the entity system, the dumps and weapon_fire all agree on.
+    /// Strips the stored designer-name prefix and upper-cases for display only. The stored form
+    /// stays <c>weapon_ak47</c>, which is what the entity system, the dumps and weapon_fire all
+    /// agree on — so it is also what the per-weapon lookup matches on.
     /// </remarks>
     private static string Display(string weapon) =>
-        weapon.StartsWith("weapon_", StringComparison.Ordinal) ? weapon[7..] : weapon;
+        (weapon.StartsWith("weapon_", StringComparison.Ordinal) ? weapon[7..] : weapon).ToUpperInvariant();
 
     /// <remarks>
     /// Mirrors <c>HitGroup_t</c>, which is not a dense range — 9 is <c>UNUSED</c> and never

@@ -154,7 +154,7 @@ public sealed partial class Ranks : BasePlugin
             _config, _points, _registry, _sessions, _awards, _ladder, _scoreboard,
             _store, _migrator, _menuEntries, _tables, _database, _events, _logger);
 
-        _menus = new RankMenus(Core, _ladder, _registry, _reset, _menuEntries, _api, _logger);
+        _menus = new RankMenus(Core, _ladder, _registry, _store, _commandsConfig, _reset, _menuEntries, _api, _logger);
 
         _commands = new CommandRegistry(Core, _commandsConfig, _menus, _registry, _reset, _api, _logger);
 

@@ -191,7 +191,7 @@ internal sealed class CommandRegistry
     {
         if (ctx.Args.Length < 2)
         {
-            ctx.Reply(_core.Localizer["admin.usage", ctx.CommandName]);
+            ctx.Reply(_core.Localizer["admin.usage_target", ctx.CommandName]);
             return;
         }
 

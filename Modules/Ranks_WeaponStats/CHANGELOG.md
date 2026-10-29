@@ -20,9 +20,10 @@ First release. Per-weapon and per-hitbox statistics for the Ranks plugin.
 
 - Tracks shots, hits, misses, damage, kills, deaths and headshots per weapon, plus hits
   and damage per hitgroup — both overall and broken down per weapon.
-- `!weaponstats` (alias `!ws`) opens a paged weapon menu; the hitgroup breakdown has a
-  screen of its own. Both are also listed under core's `!rank` → Statistics, so a player
-  finds them without knowing the command exists.
+- `!weaponstats` (alias `!ws`) opens a paged weapon menu; selecting a weapon shows where
+  that gun's hits landed. **Overall Hit Stats** is the same breakdown across every gun.
+  Both are also listed under core's `!rank` → Statistics, so a player finds them without
+  knowing the command exists.
 - `Display.TopWeapons` was dropped: it capped rows in a chat list that no longer exists,
   and the menu pages instead. `Display.MinShotsToList` still hides barely-used weapons.
 - Bot interactions are counted only when core's `Rank.BotsEnabled` is on — this module has

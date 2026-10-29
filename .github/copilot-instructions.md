@@ -1328,6 +1328,7 @@ code must be too (FR-CMD-06).
 ```csharp
 _core.Menu.CreateMenu("ranks.root")          // id doubles as the keybind scope
     .WithTitle(_core.Localizer["menu.root.title"])
+    .AddHeader(new DividerComponent())       // WithTitle draws no rule of its own
     .WithItemsPerPage(8)
     .Add(new TextComponent(_core.Localizer["menu.rank.XP", record.Points]))
     .Add(new SubmenuComponent(_core.Localizer["menu.root.stats"], _ => BuildStatistics(player)))
@@ -1336,8 +1337,13 @@ _core.Menu.CreateMenu("ranks.root")          // id doubles as the keybind scope
 ```
 
 Ids are namespaced (`"ranks.root"`, `"ranks.stats.main"`) because a menu id is
-also its keybind configuration scope, which keeps the generated keybind file
-readable.
+also its keybind configuration scope — **a duplicate id means the server owner's
+binds for one menu silently apply to the other.**
+
+`WithTitle` only *"adds a title line to the header"*; the rule under it is a
+`DividerComponent` you add yourself. Every menu here carries one at each end —
+`AddHeader` after the title, `AddFooter` before `Build()` — which separates the
+body from the title above and the key hints below.
 
 ### Components
 
@@ -1371,6 +1377,18 @@ The factory form is what you want for anything whose contents can change. A menu
 with **no parent of its own is adopted by the entry that opened it** — the same
 mechanism that lets a module's menu (FR-CMD-04) sit under core's Statistics and
 still come back.
+
+**Adoption only covers `SubmenuComponent`.** A menu opened from a row handler —
+`PagedCollectionComponent.OnItemSelected`, a `ButtonComponent` — has to be told:
+
+```csharp
+OnItemSelected = ctx =>
+{
+    var child = BuildDetail(ctx.Player, ctx.Item);
+    child.Parent = ctx.Session.Menu;   // without this, back closes the tree
+    child.Open(ctx.Player);
+}
+```
 
 ### Loading data
 
@@ -1412,6 +1430,26 @@ the empty message for a failure.
 Menu colour markup is **HTML tags, never chat brackets** (§6). A row is one
 centred line and clips at roughly **42 characters** — anything longer belongs in
 chat.
+
+### Server configuration is not ours
+
+Key binds, renderer and input method are the **server owner's**, and they live in
+`configs/menus/menus.jsonc` — **not** `core.jsonc`, and not in any Ranks config.
+The `"core.menu"` block inside that file is the section every menu inherits; its
+name has nothing to do with `core.jsonc`, which is the usual mix-up.
+
+Resolution is highest-priority-first, and the server file wins outright:
+
+| Priority | Source |
+|---|---|
+| `Global` (100) | `configs/menus/menus.jsonc` |
+| `Plugin` (50) | `WithKeybindSource` / `WithInputMethodSource` / `WithRendererSource` |
+| `CodeDefault` (0) | `WithInputMethod` / `WithRenderer` / the action's `DefaultKey` |
+
+**This repo sets none of them**, deliberately — so nothing here can shadow an
+operator's choice, and "the config is being ignored" is never a Ranks bug. Check
+the file path first, then that the menu id matches, then that the menu uses the
+`Buttons` input method (binds do not apply under `Chat`).
 
 ### Clan tag updates (scoreboard)
 
@@ -1621,6 +1659,8 @@ change could have affected.
 | Accuracy | `Hits / (Hits + Misses)`, never `Hits / Shots` | One shotgun blast is a single trigger pull that lands several hits, so a shots-based figure quietly exceeds 100% |
 | `PagedCollectionComponent<TItem>` | `TItem` is the **row type**, and the text comes from `Formatter` | The default formatter is `ToString()`, so passing `IMenuComponent` items compiles, runs, pages correctly — and draws `SwiftlyS2.Shared.Menu.Components.TextComponent` on every line. Shipped that way in the leaderboard and all three module menus |
 | Menu row width | A row is one centred line and clips at roughly **42 characters** | Both ends are cut off with no ellipsis, so a too-long row looks like corrupted text rather than a layout problem. Sentences go to chat |
+| `IMenu.Parent` | A menu opened from a **row handler** must have `Parent` set by hand | Adoption only happens for a menu a `SubmenuComponent` opened. From `OnItemSelected` the child opens fine and looks right — the break only shows when the player presses back and the whole tree closes |
+| Menu handler threading | A handler that calls a **thread-unsafe** API (`SendChat`, scoreboard/controller writes) goes through `RankMenus.OnGameThread` | A handler is not guaranteed to run on the game thread. The classic menu API dispatched every click on the thread pool and took a production server down that way; `Core.IsGameThread` + `Scheduler.NextTick` settles it without needing to know which. Framework calls like `IMenu.Open` are *not* in this class and are left alone |
 
 ### Where checking belongs instead
 

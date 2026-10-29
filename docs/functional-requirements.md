@@ -1145,9 +1145,10 @@ under it:
 |---|---|
 | My rank | Rank, points, progress bar, and the full ladder |
 | Statistics | Core's own counters, plus one row per module |
-| Leaderboard | The paged top list |
+| Leaderboard | The paged top list. Selecting a row opens that player's core statistics |
 | Settings | Preferences, and self-reset behind a confirmation |
-| Help | Prints to **chat**, then closes the menu |
+| Help | Lists the server's configured commands in **chat**, one line each, then closes the menu |
+| Admin commands | Same, for the admin commands. Rendered only for a player holding the permission on at least one, and filtered per line |
 
 Help is the one category that is not a submenu. A menu row is a single centred
 line that clips at roughly 42 characters, and every help line is a sentence — so
@@ -1221,6 +1222,7 @@ Core's menus map onto stock components; nothing here needs a custom renderer:
 | Surface | Component |
 |---|---|
 | Rank and statistics lines | `TitleComponent`, `TextComponent` |
+| The rule under every title | `DividerComponent`, via `AddHeader` |
 | Progress to the next band | `ProgressBarComponent` |
 | Leaderboard | `PagedCollectionComponent<T>` — paging is built in |
 | Point-message toggle (FR-PTS-08) | `ToggleComponent` |

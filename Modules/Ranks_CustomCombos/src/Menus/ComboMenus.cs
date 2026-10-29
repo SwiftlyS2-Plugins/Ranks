@@ -39,6 +39,7 @@ internal sealed class ComboMenus
 
         return _core.Menu.CreateMenu("customcombos.list")
             .WithTitle(_core.Localizer["menu.combos.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8)
             .Add(new PagedCollectionComponent<ComboStatRow>(async () =>
             {
@@ -59,6 +60,7 @@ internal sealed class ComboMenus
                 EmptyText = _core.Localizer["menu.combos.empty"],
                 FailedText = _core.Localizer["menu.combos.error"],
             })
+            .AddFooter(new DividerComponent())
             .Build();
     }
 

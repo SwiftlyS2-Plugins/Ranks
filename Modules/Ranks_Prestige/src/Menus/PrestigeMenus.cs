@@ -36,15 +36,16 @@ internal sealed class PrestigeMenus
     {
         var builder = _core.Menu.CreateMenu("prestige.standing")
             .WithTitle(_core.Localizer["menu.prestige.title"])
+            .AddHeader(new DividerComponent())
             .WithItemsPerPage(8);
 
         if (!_config.Enabled)
-            return builder.Add(new TextComponent(_core.Localizer["prestige.disabled"])).Build();
+            return builder.Add(new TextComponent(_core.Localizer["prestige.disabled"])).AddFooter(new DividerComponent()).Build();
 
         // IsAvailable is a plain bool, so reading it resolves nothing. Without this the first open
         // on a server with no Ranks installed JITs StandingFor and throws here.
         if (!_bridge.IsAvailable || _bridge.StandingFor(player) is not { } standing)
-            return builder.Add(new TextComponent(_core.Localizer["error.unavailable"])).Build();
+            return builder.Add(new TextComponent(_core.Localizer["error.unavailable"])).AddFooter(new DividerComponent()).Build();
 
         builder.Add(new TextComponent(standing.Level == 0
             ? _core.Localizer["prestige.none"]
@@ -54,6 +55,6 @@ internal sealed class PrestigeMenus
             ? _core.Localizer["prestige.next", remaining]
             : _core.Localizer["prestige.max"]));
 
-        return builder.Build();
+        return builder.AddFooter(new DividerComponent()).Build();
     }
 }

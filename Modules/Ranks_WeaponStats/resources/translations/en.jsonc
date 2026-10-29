@@ -16,12 +16,16 @@
 
   "menu.weapons.title": "Weapon stats",
   "menu.weapons.empty": "You have no weapon statistics yet.",
+  "menu.weapons.hint": "Select to see where this weapon's hits landed",
   // Rows are one centred line and clip at roughly 42 characters, so damage is left to the API.
-  "menu.weapons.row": "{0} - {1} kills, {2}% acc, {3}% HS",
+  "menu.weapons.row": "{0} | {1} Kills, {2}% HS, {3}% Accuracy",
 
-  "menu.hitgroups.title": "Hit stats",
+  "menu.hitgroups.title": "Overall Hit Stats",
   "menu.hitgroups.empty": "You have not landed any hits yet.",
   "menu.hitgroups.row": "{0}: {1} hits ({2}%), {3} dmg",
+
+  // {0} is the weapon, already stripped of its weapon_ prefix and upper-cased.
+  "menu.weaponhits.title": "{0} - Hit Stats",
 
   "hitgroup.generic": "Generic",
   "hitgroup.head": "Head",

@@ -36,6 +36,8 @@
   // ---- Admin --------------------------------------------------------------
 
   "admin.usage": "[red]Usage:[default] {0} <target> <amount>",
+  // No amount: this one takes a target and nothing else.
+  "admin.usage_target": "[red]Usage:[default] {0} <target>",
   "admin.bad_amount": "[red]'{0}' is not a number.",
   "admin.no_target": "[red]No player matched '{0}'.",
   "admin.adjusted": "[lime]{0}[default] now has [gold]{1}[default] XP.",
@@ -43,14 +45,29 @@
 
   // ---- Help ---------------------------------------------------------------
   //
-  // Chat, not menu rows: a menu row is one centred line that clips at roughly 42 characters,
-  // and every one of these is a sentence. Chat tags here, not HTML.
+  // Chat, not menu rows: a menu row is one centred line that clips at roughly 42 characters.
+  // Chat tags here, not HTML.
+  //
+  // {0} is the command's CONFIGURED name from commands.jsonc, without the ! prefix — so a
+  // renamed command describes itself correctly and a removed one is not listed at all. Keep the
+  // literal "!" in front of {0}.
 
-  "help.points": "[gold]XP[default] is earned by killing, winning rounds and playing the objective.",
-  "help.ranks": "XP raises your [gold]rank[default]. Dying costs XP, so ranks can go down too.",
-  "help.stats": "[lime]Statistics[default] shows your lifetime totals, including any installed modules.",
-  "help.scoreboard": "Your rank is shown beside your name on the [lime]scoreboard[default].",
-  "help.commands": "[gold]!rank[default] opens this menu | [gold]!top[default] leaderboard | [gold]!stats[default] statistics",
+  "help.header": "[gold]Available commands:",
+  "help.rank": "[gold]!{0} [default]- Your detailed stats, settings and ranks info",
+  "help.stats": "[gold]!{0} [default]- Your statistics menu",
+  "help.ranks": "[gold]!{0} [default]- All available ranks",
+  "help.top": "[gold]!{0} [default]- Leaderboard of top players. Select a player to view their stats",
+  "help.resetmyrank": "[gold]!{0} [default]- Wipes your own XP and statistics. Asks to confirm first",
+
+  // Shown only to a player who holds the permission on at least one of these, and each line only
+  // to someone who can run that command — so this never advertises something that would be
+  // refused. {0} is the configured name, as above.
+
+  "help.admin_header": "[gold]Admin commands:",
+  "help.setpoints": "[gold]!{0} [grey]<target Name/SteamID/StatusID> <amount> [default]- Sets the target's XP to the exact amount",
+  "help.givepoints": "[gold]!{0} [grey]<target Name/SteamID/StatusID> <amount> [default]- Adds XP to the target",
+  "help.removepoints": "[gold]!{0} [grey]<target Name/SteamID/StatusID> <amount> [default]- Subtracts XP from the target",
+  "help.resetrank": "[gold]!{0} [grey]<target Name/SteamID/StatusID> [default]- Wipes the target's XP and statistics",
 
   // ---- Menus --------------------------------------------------------------
   //
@@ -63,6 +80,8 @@
   "menu.root.top": "Leaderboard",
   "menu.root.settings": "Settings",
   "menu.root.help": "Help (shown in chat)",
+  // Only rendered for a player who can run at least one admin command.
+  "menu.root.admin": "Admin commands (shown in chat)",
 
   "menu.rank.title": "Your rank",
   "menu.rank.current": "Rank: {0}",
@@ -98,8 +117,13 @@
 
   "menu.top.title": "Leaderboard",
   "menu.top.row": "#{0} {1} - {2}",
+  "menu.top.hint": "Select to view this player's statistics",
   "menu.top.empty": "Nobody is ranked yet.",
   "menu.top.error": "The leaderboard is unavailable right now.",
+
+  // {0} is the player's stored name.
+  "menu.playerstats.title": "{0}",
+  "menu.playerstats.empty": "This player has no statistics stored.",
 
   // ---- Command help -------------------------------------------------------
   //

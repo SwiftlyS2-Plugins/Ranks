@@ -9,7 +9,7 @@ namespace Ranks.Players;
 /// <c>Headshots</c>, <c>Hits</c> and <c>Misses</c> when those columns were added, which left a
 /// "reset" that silently kept a player's accuracy history.
 ///
-/// <c>Name</c>, <c>FirstSeen</c> and <c>ShowPointMessages</c> deliberately survive \u2014 identity and
+/// <c>Name</c>, <c>FirstSeen</c> and <c>ShowPointMessages</c> deliberately survive — identity and
 /// preferences are not progression, and clearing <c>FirstSeen</c> would make the row look new to
 /// the inactivity purge.
 /// </remarks>

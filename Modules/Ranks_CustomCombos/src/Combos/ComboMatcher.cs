@@ -198,7 +198,7 @@ internal sealed class ComboMatcher
     /// <paramref name="bumpSameTickCount"/> is called for <em>every</em> combo that matched, not
     /// only the winner, and its return is that combo's run of matching kills on the current tick.
     /// Returning early instead would stall a less specific Count combo every time a more specific
-    /// one took the kill \u2014 the run is about what happened, not about who was paid.
+    /// one took the kill — the run is about what happened, not about who was paid.
     ///
     /// Keeping it a callback leaves the tick bookkeeping with the caller, which owns the scheduler.
     /// </remarks>
