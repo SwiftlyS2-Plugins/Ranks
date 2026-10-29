@@ -22,4 +22,6 @@ Notable changes to Ranks, newest first.
 
 ---
 
-Older releases: <https://github.com/shmitzas/Ranks/releases>
+## [1.0.0] - 2026-10-29
+
+- Initial release
