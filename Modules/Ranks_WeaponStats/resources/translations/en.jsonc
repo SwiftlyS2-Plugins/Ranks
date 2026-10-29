@@ -16,7 +16,8 @@
 
   "menu.weapons.title": "Weapon stats",
   "menu.weapons.empty": "You have no weapon statistics yet.",
-  "menu.weapons.row": "{0} - {1} kills, {2}% acc, {3}% HS, {4} dmg",
+  // Rows are one centred line and clip at roughly 42 characters, so damage is left to the API.
+  "menu.weapons.row": "{0} - {1} kills, {2}% acc, {3}% HS",
 
   "menu.hitgroups.title": "Hit stats",
   "menu.hitgroups.empty": "You have not landed any hits yet.",

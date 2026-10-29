@@ -1147,7 +1147,11 @@ under it:
 | Statistics | Core's own counters, plus one row per module |
 | Leaderboard | The paged top list |
 | Settings | Preferences, and self-reset behind a confirmation |
-| Help | What points are, how ranks move, which commands exist |
+| Help | Prints to **chat**, then closes the menu |
+
+Help is the one category that is not a submenu. A menu row is a single centred
+line that clips at roughly 42 characters, and every help line is a sentence — so
+it is written to chat, where it can also be scrolled back to.
 
 A module registers through `RegisterMenuEntry`, naming a section and supplying a
 factory. **Core calls the factory and nests what it returns**, so the module owns
@@ -1221,11 +1225,13 @@ Core's menus map onto stock components; nothing here needs a custom renderer:
 | Leaderboard | `PagedCollectionComponent<T>` — paging is built in |
 | Point-message toggle (FR-PTS-08) | `ToggleComponent` |
 | Every category and module entry | `SubmenuComponent` |
-| Reset confirmation | `ButtonComponent` |
+| Reset confirmation, and Help | `ButtonComponent` |
 
 `PagedCollectionComponent<T>` is the reason the leaderboard needs no hand-rolled
 paging, and `ToggleComponent` maps one-to-one onto
-`ranks_settings.show_point_messages`.
+`ranks_settings.show_point_messages`. **`T` is the row type and the text comes
+from `Formatter`** — the default is `ToString()`, so passing components renders
+their type name.
 
 **Nesting is `SubmenuComponent`, never `ButtonComponent` + `Open()`.** `Open()`
 starts a new root with no back-stack, so the player's back key would have nothing

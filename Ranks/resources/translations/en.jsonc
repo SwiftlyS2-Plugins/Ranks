@@ -41,6 +41,17 @@
   "admin.adjusted": "[lime]{0}[default] now has [gold]{1}[default] XP.",
   "admin.reset": "[lime]{0}[default] has been reset.",
 
+  // ---- Help ---------------------------------------------------------------
+  //
+  // Chat, not menu rows: a menu row is one centred line that clips at roughly 42 characters,
+  // and every one of these is a sentence. Chat tags here, not HTML.
+
+  "help.points": "[gold]XP[default] is earned by killing, winning rounds and playing the objective.",
+  "help.ranks": "XP raises your [gold]rank[default]. Dying costs XP, so ranks can go down too.",
+  "help.stats": "[lime]Statistics[default] shows your lifetime totals, including any installed modules.",
+  "help.scoreboard": "Your rank is shown beside your name on the [lime]scoreboard[default].",
+  "help.commands": "[gold]!rank[default] opens this menu | [gold]!top[default] leaderboard | [gold]!stats[default] statistics",
+
   // ---- Menus --------------------------------------------------------------
   //
   // The whole player-facing surface lives here: !rank opens the root and every other command is
@@ -51,7 +62,7 @@
   "menu.root.stats": "Statistics",
   "menu.root.top": "Leaderboard",
   "menu.root.settings": "Settings",
-  "menu.root.help": "Help",
+  "menu.root.help": "Help (shown in chat)",
 
   "menu.rank.title": "Your rank",
   "menu.rank.current": "Rank: {0}",
@@ -89,13 +100,6 @@
   "menu.top.row": "#{0} {1} - {2}",
   "menu.top.empty": "Nobody is ranked yet.",
   "menu.top.error": "The leaderboard is unavailable right now.",
-
-  "menu.help.title": "Help",
-  "menu.help.points": "Earn XP by killing, winning rounds and playing the objective.",
-  "menu.help.ranks": "XP raises your rank. Dying costs XP, so ranks can go down too.",
-  "menu.help.stats": "Statistics shows your lifetime totals, including any installed modules.",
-  "menu.help.scoreboard": "Your rank is shown beside your name on the scoreboard.",
-  "menu.help.commands": "Type !rank for this menu, !top for the leaderboard, !stats for statistics.",
 
   // ---- Command help -------------------------------------------------------
   //

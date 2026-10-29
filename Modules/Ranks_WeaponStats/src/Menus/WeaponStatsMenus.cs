@@ -42,7 +42,12 @@ internal sealed class WeaponStatsMenus
 
     public void OpenWeapons(IPlayer player) => BuildWeapons(player).Open(player);
 
-    /// <summary>Per-weapon kills, accuracy, headshot rate and damage, best first.</summary>
+    /// <summary>Per-weapon kills, accuracy and headshot rate, best first.</summary>
+    /// <remarks>
+    /// The item type is the row, never <c>IMenuComponent</c>: the component renders each item
+    /// through <c>Formatter</c>, whose default is <c>ToString()</c> — so a component as the item
+    /// draws its own type name.
+    /// </remarks>
     public IMenu BuildWeapons(IPlayer player)
     {
         var steamId = player.SteamID;
@@ -51,7 +56,7 @@ internal sealed class WeaponStatsMenus
         return _core.Menu.CreateMenu("weaponstats.weapons")
             .WithTitle(_core.Localizer["menu.weapons.title"])
             .WithItemsPerPage(8)
-            .Add(new PagedCollectionComponent<IMenuComponent>(async () =>
+            .Add(new PagedCollectionComponent<WeaponStatRow>(async () =>
             {
                 try
                 {
@@ -60,29 +65,29 @@ internal sealed class WeaponStatsMenus
                     // The operator's noise floor still applies: a menu page of weapons fired once
                     // each buries the ones the player actually uses. There is no row cap, though —
                     // paging is what the old TopWeapons limit existed to stand in for.
-                    var listed = rows.Where(r => r.Shots >= minShots).ToList();
-
-                    if (listed.Count == 0)
-                        return [new TextComponent(_core.Localizer["menu.weapons.empty"])];
-
-                    return listed
+                    return rows
+                        .Where(r => r.Shots >= minShots)
                         .OrderByDescending(r => r.Kills)
                         .ThenByDescending(r => r.Damage)
-                        .Select(r => (IMenuComponent)new TextComponent(_core.Localizer[
-                            "menu.weapons.row",
-                            Display(r.Weapon),
-                            r.Kills,
-                            Percent(r.Hits, r.Hits + r.Misses),
-                            Percent(r.Headshots, r.Kills),
-                            r.Damage]))
                         .ToList();
                 }
                 catch (Exception ex)
                 {
+                    // Rethrown so the component shows FailedText; caught only to get it logged.
                     _logger.LogError(ex, "Ranks_WeaponStats: failed to build the weapon menu for {SteamId}.", steamId);
-                    return [new TextComponent(_core.Localizer["menu.error"])];
+                    throw;
                 }
-            }))
+            })
+            {
+                Formatter = r => _core.Localizer[
+                    "menu.weapons.row",
+                    Display(r.Weapon),
+                    r.Kills,
+                    Percent(r.Hits, r.Hits + r.Misses),
+                    Percent(r.Headshots, r.Kills)],
+                EmptyText = _core.Localizer["menu.weapons.empty"],
+                FailedText = _core.Localizer["menu.error"],
+            })
             .Build();
     }
 
@@ -94,35 +99,36 @@ internal sealed class WeaponStatsMenus
         return _core.Menu.CreateMenu("weaponstats.hitgroups")
             .WithTitle(_core.Localizer["menu.hitgroups.title"])
             .WithItemsPerPage(8)
-            .Add(new PagedCollectionComponent<IMenuComponent>(async () =>
+            .Add(new PagedCollectionComponent<HitRow>(async () =>
             {
                 try
                 {
                     var rows = await _api.GetHitGroupsAsync(steamId).ConfigureAwait(false);
 
-                    if (rows.Count == 0)
-                        return [new TextComponent(_core.Localizer["menu.hitgroups.empty"])];
-
+                    // Share is projected here rather than formatted later: the formatter sees one
+                    // row at a time and cannot know the total.
                     var total = rows.Sum(r => r.Hits);
 
                     return rows
                         .OrderByDescending(r => r.Hits)
-                        .Select(r => (IMenuComponent)new TextComponent(_core.Localizer[
-                            "menu.hitgroups.row",
-                            HitGroupName(r.HitGroup),
-                            r.Hits,
-                            Percent(r.Hits, total),
-                            r.Damage]))
+                        .Select(r => new HitRow(HitGroupName(r.HitGroup), r.Hits, Percent(r.Hits, total), r.Damage))
                         .ToList();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Ranks_WeaponStats: failed to build the hitgroup menu for {SteamId}.", steamId);
-                    return [new TextComponent(_core.Localizer["menu.error"])];
+                    throw;
                 }
-            }))
+            })
+            {
+                Formatter = r => _core.Localizer["menu.hitgroups.row", r.Name, r.Hits, r.Share, r.Damage],
+                EmptyText = _core.Localizer["menu.hitgroups.empty"],
+                FailedText = _core.Localizer["menu.error"],
+            })
             .Build();
     }
+
+    private readonly record struct HitRow(string Name, long Hits, double Share, long Damage);
 
     private static double Percent(long part, long whole) => whole == 0 ? 0 : Math.Round(part * 100.0 / whole, 1);
 

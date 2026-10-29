@@ -70,7 +70,12 @@ internal sealed class RankMenus
             .Add(new SubmenuComponent(_core.Localizer["menu.root.stats"], _ => BuildStatistics(player)))
             .Add(new SubmenuComponent(_core.Localizer["menu.root.top"], _ => BuildTop()))
             .Add(new SubmenuComponent(_core.Localizer["menu.root.settings"], _ => BuildSettings(player)))
-            .Add(new SubmenuComponent(_core.Localizer["menu.root.help"], _ => BuildHelp()))
+            .Add(new ButtonComponent(_core.Localizer["menu.root.help"], ctx =>
+            {
+                SendHelp(player);
+                ctx.Session.Close();
+                return ValueTask.CompletedTask;
+            }))
             .Build()
             .Open(player);
     }
@@ -191,27 +196,33 @@ internal sealed class RankMenus
     // ---- Leaderboard ---------------------------------------------------------
 
     /// <summary>Paging is the component's job, so nothing here hand-rolls it.</summary>
+    /// <remarks>
+    /// The item type is the row, never <c>IMenuComponent</c>: the component renders each item
+    /// through <c>Formatter</c>, whose default is <c>ToString()</c> — so a component as the item
+    /// draws its own type name.
+    /// </remarks>
     private IMenu BuildTop() =>
         _core.Menu.CreateMenu("ranks.top")
             .WithTitle(_core.Localizer["menu.top.title"])
             .WithItemsPerPage(10)
-            .Add(new PagedCollectionComponent<IMenuComponent>(async () =>
+            .Add(new PagedCollectionComponent<RanksLeaderboardEntry>(async () =>
             {
                 try
                 {
-                    var rows = await _api.GetTopAsync("points", 50).ConfigureAwait(false);
-
-                    return rows.Count == 0
-                        ? [new TextComponent(_core.Localizer["menu.top.empty"])]
-                        : rows.Select(r => (IMenuComponent)new TextComponent(
-                            _core.Localizer["menu.top.row", r.Position, r.Name, r.Value])).ToList();
+                    return await _api.GetTopAsync("points", 50).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
+                    // Rethrown so the component shows FailedText; caught only to get it logged.
                     _logger.LogError(ex, "Ranks: failed to build the leaderboard menu.");
-                    return [new TextComponent(_core.Localizer["menu.top.error"])];
+                    throw;
                 }
-            }))
+            })
+            {
+                Formatter = e => _core.Localizer["menu.top.row", e.Position, e.Name, e.Value],
+                EmptyText = _core.Localizer["menu.top.empty"],
+                FailedText = _core.Localizer["menu.top.error"],
+            })
             .Build();
 
     // ---- Settings ------------------------------------------------------------
@@ -262,14 +273,16 @@ internal sealed class RankMenus
 
     // ---- Help ----------------------------------------------------------------
 
-    private IMenu BuildHelp() =>
-        _core.Menu.CreateMenu("ranks.help")
-            .WithTitle(_core.Localizer["menu.help.title"])
-            .WithItemsPerPage(8)
-            .Add(new TextComponent(_core.Localizer["menu.help.points"]))
-            .Add(new TextComponent(_core.Localizer["menu.help.ranks"]))
-            .Add(new TextComponent(_core.Localizer["menu.help.stats"]))
-            .Add(new TextComponent(_core.Localizer["menu.help.scoreboard"]))
-            .Add(new TextComponent(_core.Localizer["menu.help.commands"]))
-            .Build();
+    /// <remarks>
+    /// Chat, not a menu: these are full sentences, and a menu row is a single centred line that
+    /// clips well before one ends. Closing the menu is what makes the chat readable.
+    /// </remarks>
+    private void SendHelp(IPlayer player)
+    {
+        Chat.Send(_core, player, "help.points");
+        Chat.Send(_core, player, "help.ranks");
+        Chat.Send(_core, player, "help.stats");
+        Chat.Send(_core, player, "help.scoreboard");
+        Chat.Send(_core, player, "help.commands");
+    }
 }

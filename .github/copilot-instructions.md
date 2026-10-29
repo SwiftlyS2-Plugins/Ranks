@@ -1379,16 +1379,26 @@ the database goes inside `PagedCollectionComponent`, which owns its own thread
 and already pages:
 
 ```csharp
-.Add(new PagedCollectionComponent<IMenuComponent>(async () =>
+.Add(new PagedCollectionComponent<RanksLeaderboardEntry>(async () =>
 {
-    try   { var rows = await _api.GetTopAsync("points", 50).ConfigureAwait(false);
-            return rows.Select(r => (IMenuComponent)new TextComponent(...)).ToList(); }
-    catch (Exception ex) { _logger.LogError(ex, "..."); return [new TextComponent(error)]; }
-}))
+    try   { return await _api.GetTopAsync("points", 50).ConfigureAwait(false); }
+    catch (Exception ex) { _logger.LogError(ex, "..."); throw; }   // rethrow -> FailedText
+})
+{
+    Formatter  = e => _core.Localizer["menu.top.row", e.Position, e.Name, e.Value],
+    EmptyText  = _core.Localizer["menu.top.empty"],
+    FailedText = _core.Localizer["menu.top.error"],
+})
 ```
 
-Catch inside the loader — an exception there otherwise surfaces as an empty menu
-with no explanation.
+**`TItem` is the row type, never `IMenuComponent`.** The component renders each
+item through `Formatter`, which defaults to `ToString()` — so handing it
+`TextComponent`s draws `SwiftlyS2.Shared.Menu.Components.TextComponent` on every
+line. Both this repo's leaderboard and its module menus shipped that way once.
+
+`EmptyText` and `FailedText` cover the no-rows and threw cases, so the loader
+returns data only. Catch to **log and rethrow** — swallowing the exception shows
+the empty message for a failure.
 
 ### Lifetime
 
@@ -1399,7 +1409,9 @@ with no explanation.
 - A **module's contributed entry is a delegate core holds**, not a menu core owns,
   so it needs explicit unregistration (`RanksModuleBase.Unregister` does it).
 
-Menu colour markup is **HTML tags, never chat brackets** (§6).
+Menu colour markup is **HTML tags, never chat brackets** (§6). A row is one
+centred line and clips at roughly **42 characters** — anything longer belongs in
+chat.
 
 ### Clan tag updates (scoreboard)
 
@@ -1607,6 +1619,8 @@ change could have affected.
 | Menu nesting | Every parent-child link is a `SubmenuComponent`, never `ButtonComponent` + `Open()` | `Open()` starts a new root with no back-stack. The menu looks right until the player presses back and the whole tree closes |
 | `PlayerReset` | Zeroes **every** counter, including `Headshots`, `Hits` and `Misses` | A forgotten column leaves a "reset" player carrying their old accuracy, which only shows up on a stat nobody checks first. The command's copy already had this bug before the two were merged |
 | Accuracy | `Hits / (Hits + Misses)`, never `Hits / Shots` | One shotgun blast is a single trigger pull that lands several hits, so a shots-based figure quietly exceeds 100% |
+| `PagedCollectionComponent<TItem>` | `TItem` is the **row type**, and the text comes from `Formatter` | The default formatter is `ToString()`, so passing `IMenuComponent` items compiles, runs, pages correctly — and draws `SwiftlyS2.Shared.Menu.Components.TextComponent` on every line. Shipped that way in the leaderboard and all three module menus |
+| Menu row width | A row is one centred line and clips at roughly **42 characters** | Both ends are cut off with no ellipsis, so a too-long row looks like corrupted text rather than a layout problem. Sentences go to chat |
 
 ### Where checking belongs instead
 

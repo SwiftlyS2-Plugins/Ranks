@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Ranks.CustomCombos.Contract;
 using SwiftlyS2.Shared;
@@ -27,6 +28,11 @@ internal sealed class ComboMenus
 
     public void Open(IPlayer player) => Build(player).Open(player);
 
+    /// <remarks>
+    /// The item type is the row, never <c>IMenuComponent</c>: the component renders each item
+    /// through <c>Formatter</c>, whose default is <c>ToString()</c> — so a component as the item
+    /// draws its own type name.
+    /// </remarks>
     public IMenu Build(IPlayer player)
     {
         var steamId = player.SteamID;
@@ -34,24 +40,25 @@ internal sealed class ComboMenus
         return _core.Menu.CreateMenu("customcombos.list")
             .WithTitle(_core.Localizer["menu.combos.title"])
             .WithItemsPerPage(8)
-            .Add(new PagedCollectionComponent<IMenuComponent>(async () =>
+            .Add(new PagedCollectionComponent<ComboStatRow>(async () =>
             {
                 try
                 {
                     // Already ordered by count, descending.
-                    var rows = await _api.GetCombosAsync(steamId).ConfigureAwait(false);
-
-                    return rows.Count == 0
-                        ? [new TextComponent(_core.Localizer["menu.combos.empty"])]
-                        : rows.Select(r => (IMenuComponent)new TextComponent(
-                            _core.Localizer["menu.combos.row", Describe(r.ComboKey), r.Count])).ToList();
+                    return await _api.GetCombosAsync(steamId).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
+                    // Rethrown so the component shows FailedText; caught only to get it logged.
                     _logger.LogError(ex, "Ranks_CustomCombos: failed to build the combo menu for {SteamId}.", steamId);
-                    return [new TextComponent(_core.Localizer["menu.combos.error"])];
+                    throw;
                 }
-            }))
+            })
+            {
+                Formatter = r => _core.Localizer["menu.combos.row", Describe(r.ComboKey), r.Count],
+                EmptyText = _core.Localizer["menu.combos.empty"],
+                FailedText = _core.Localizer["menu.combos.error"],
+            })
             .Build();
     }
 
@@ -65,6 +72,16 @@ internal sealed class ComboMenus
                || string.Equals(resolved, key, StringComparison.Ordinal)
                || resolved.EndsWith('.' + key, StringComparison.Ordinal)
             ? comboKey
-            : resolved;
+            : StripColorTokens(resolved);
     }
+
+    /// <remarks>
+    /// <c>combo.*</c> names are operator-authored and shared with the arbiter's chat line, so they
+    /// routinely carry chat colour tokens. A menu row wants HTML, so a token left in renders as
+    /// literal <c>{lime}</c> text to the player.
+    /// </remarks>
+    private static string StripColorTokens(string text) =>
+        ColorToken.Replace(text, string.Empty).Trim();
+
+    private static readonly Regex ColorToken = new(@"\{[a-zA-Z]+\}|\[[a-zA-Z]+\]", RegexOptions.Compiled);
 }
