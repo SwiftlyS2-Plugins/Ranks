@@ -22,27 +22,22 @@ inline task. The version lives in exactly one place; nothing else needs stamping
 ### Cutting a release
 
 `.github/workflows/release.yml` runs on `workflow_dispatch`, or on a push to `main`
-whose commit message contains `[release]`. It reads the same
-`PluginMetadata.Version`, takes the matching `## [x.y.z]` section of the component's
-`CHANGELOG.md` as the release body, and uploads the zip.
+whose commit message contains `[release]`. It takes no inputs.
 
-**One run publishes every component that has something to publish.** The `target`
-input defaults to `all`: core and the four modules each get their own tag, notes and
-release, from a single build. Core and the modules version independently, so under
-`all` a component already published at its current version is **skipped with a
-notice** rather than failing the run — otherwise bumping one module would be blocked
-by the four that did not change. Naming a single component instead keeps the old
-behaviour and still **errors** on an existing tag, which is what makes an accidental
-re-release loud. A run where everything is already published is an error, not a
-silent success.
+**A run produces exactly one release: `v<version>`, titled `Ranks | v<version>`, with
+five zips attached** — core plus all four modules, every one built from that same
+commit. That is the whole shape; there is deliberately no per-module release and no
+chooser. Attaching the modules to core's release is what stops an operator having to
+work out which module zip goes with which core version.
 
-Every component is validated before anything is built, so a version mismatch in one
-cannot leave the others already released. A core release additionally attaches the
-module zips built from the same commit, so an operator never has to work out which
-module zip goes with which core version.
+The version, the notes and the tag all come from **core's** `CHANGELOG.md` and must
+match `PluginMetadata.Version` in `Ranks/src/Entrypoint.cs`. Modules are versioned
+independently and their zips are collected by glob, so a module keeps its own version
+in its filename but never gets a tag or a release of its own.
 
-So a release needs **both** a version bump and a matching changelog section — a
-missing section fails the run by design. Style rules live in
+An existing tag **fails** the run rather than overwriting it, which is what makes an
+accidental re-release loud. So a release needs **both** a version bump and a matching
+changelog section — a missing section fails by design. Style rules live in
 `.github/instructions/changelog.instructions.md`.
 
 `docs/verify-release-workflow.sh` runs that logic against the real repo with `gh`

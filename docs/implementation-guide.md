@@ -1632,13 +1632,13 @@ module is present, so the warning is unconditional and must say so.
 dotnet publish -c Release        # → build/publish, plus a distributable zip
 ```
 
-Releases are cut by `.github/workflows/release.yml`. Its `target` input defaults to
-`all`, and one run builds everything and publishes a **separate release per
-component** — core plus each module, each with its own tag, notes and zip. Core and
-the modules version independently, so a component already published at its current
-version is skipped rather than failing the run; naming one component explicitly
-still errors on an existing tag. `docs/verify-release-workflow.sh` exercises that
-logic with `gh` stubbed.
+Releases are cut by `.github/workflows/release.yml`, which takes no inputs. One run
+builds core and all four modules from the same commit and publishes **a single
+release**, `v<version>`, with all five zips attached. Modules are versioned
+independently — their zips carry their own version in the filename — but they get no
+tag and no release of their own. The version and notes come from core's
+`CHANGELOG.md` and must match `PluginMetadata.Version`.
+`docs/verify-release-workflow.sh` exercises that logic with `gh` stubbed.
 
 Before tagging:
 
