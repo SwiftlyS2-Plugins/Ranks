@@ -136,7 +136,7 @@ internal sealed class ScoreboardService : IDisposable
     {
         var config = _config.Current;
 
-        if (config.Scoreboard.Mode == RankDisplayMode.Off) return;
+        if (config.Scoreboard.RankMode == RankDisplayMode.Off) return;
 
         foreach (var player in _core.PlayerManager.GetAllPlayers())
         {
@@ -231,15 +231,15 @@ internal sealed class ScoreboardService : IDisposable
     /// <remarks>
     /// An unparseable name is ignored rather than treated as Off: a module typo should not silently
     /// blank every scoreboard, and the string crosses an assembly boundary where no enum can.
-    /// IsDefined is part of that: TryParse also accepts numbers, so without it a stale "4" would
-    /// resolve to the removed DangerZone member and EngineRankType would map it to 0 — no rank.
+    /// IsDefined is part of that: TryParse also accepts numbers, so without it a stale "5" would
+    /// resolve to no member at all and EngineRankType would map it to 0 — no rank.
     /// </remarks>
     internal static RankDisplayMode ResolveMode(RanksConfig config, RanksDisplayOverride? overlay) =>
         overlay?.RankMode is { Length: > 0 } name
         && Enum.TryParse<RankDisplayMode>(name, ignoreCase: true, out var mode)
         && Enum.IsDefined(mode)
             ? mode
-            : config.Scoreboard.Mode;
+            : config.Scoreboard.RankMode;
 
     private const int MaxSkillGroup = 18;
 

@@ -22,6 +22,12 @@ Notable changes to Ranks, newest first.
 
 ---
 
+
+## [1.0.1] - 2026-10-29
+
+- Fixed `RankMode` modes to have 4 modes instead of 5 (5-th one was DangerZone which is not present in CS2)
+- Removed `Mode` config option. It was being used as a fallback for `RankMode` (leftover thing from POC version)
+
 ## [1.0.0] - 2026-10-29
 
 - Fixed modules depenency loading when publishing the plugin
