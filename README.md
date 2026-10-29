@@ -11,7 +11,8 @@
 </p>
 
 > [!NOTE]
-> **Migrating from another ranking plugin?** [Ranks_Importer](https://github.com/shmitzas/PluginDataImporters)
+> **Migrating from another ranking plugin?**<br>
+> [Ranks_Importer](https://github.com/shmitzas/PluginDataImporters)
 > is a separate one-shot tool that imports from:
 > - **[LVL Ranks](https://github.com/Pisex/cs2-lvl_ranks)** - by [Pisex](https://github.com/Pisex) — the original, plus its [modules](https://github.com/Pisex/cs2-lvl_ranks_modules)
 > - **[K4-LevelRanks-SwiftlyS2](https://github.com/K4ryuu/K4-LevelRanks-SwiftlyS2)** - by [K4ryuu](https://github.com/K4ryuu) — now archived
