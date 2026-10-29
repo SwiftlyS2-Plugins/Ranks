@@ -348,35 +348,6 @@ internal sealed class Writer
         });
     }
 
-    /// <summary>Reads a player's weapon rows for the stats command.</summary>
-    public List<(string Weapon, long Shots, long Hits, long Misses, long Damage, long Kills, long Deaths, long Headshots)> Top(ulong steamId, int limit, int minShots)
-    {
-        var rows = new List<(string, long, long, long, long, long, long, long)>();
-
-        using var connection = _core.Database.GetConnection(_connectionName);
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            SELECT weapon, shots, hits, misses, damage, kills, deaths, headshots
-              FROM {_weaponTable}
-             WHERE steam_id = @steam_id AND shots >= @min_shots
-             ORDER BY kills DESC, shots DESC
-             LIMIT @limit
-            """;
-
-        Add(command, "@steam_id", (long)steamId);
-        Add(command, "@min_shots", (long)minShots);
-        Add(command, "@limit", limit);
-
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
-                      reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7)));
-
-        return rows;
-    }
-
     private static void Add(IDbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter();

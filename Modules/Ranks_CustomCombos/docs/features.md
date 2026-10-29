@@ -237,7 +237,7 @@ this shape rather than a plain `AddPoints` call:
 | `MinPlayers`, `WarmupPoints`, `BotsEnabled`, `FfaMode` | all four, from `GetPointSettings` |
 | VIP multiplier and flags | `VipMultiplier`, `VipFlags` |
 | Single away-from-zero rounding | the whole rounding rule |
-| `Points.ShowPointMessages` **and** the per-player `!togglepointmsg` preference | impossible — the per-player flag is not on `IRanksApi` |
+| `Points.ShowPointMessages` **and** the per-player XP-messages toggle | impossible — the per-player flag is not on `IRanksApi` |
 | `RoundEndSummary` batching | impossible — the buffer is core-internal |
 
 The last two are why the module must not print its own chat line: it would spam players who

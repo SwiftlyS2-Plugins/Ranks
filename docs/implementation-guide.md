@@ -1358,9 +1358,13 @@ Three consequences worth holding on to:
 - **Menus are released automatically when the plugin unloads** — each plugin
   gets its own `IMenuService` over core-owned registries — so `Unload` needs no
   menu teardown.
-- `PagedCollectionComponent<T>` already pages, so `!top` must not hand-roll it.
+- `PagedCollectionComponent<T>` already pages, so the leaderboard must not hand-roll it.
 
-Core's menus are core's own (FR-CMD-04). A module ships its own command.
+Core ships one root menu of categories and modules hang entries off it
+(FR-CMD-04). Nest with `SubmenuComponent`, never `ButtonComponent` + `Open()`:
+`Open()` starts a new root with no back-stack, so the player's back key would
+have nothing to return to. The same adoption rule is what lets a module's menu
+sit under Statistics and still come back to core's.
 
 ---
 
@@ -1410,8 +1414,12 @@ API and core handles, the database-coordination members (`ConnectionName`,
 core's lifecycle events, and a `Register()` / `Unregister()` pair.
 
 It is **not** VIPCore's `VipFeatureBase`. That class registers a per-player
-toggle into a shared VIP menu; FR-CMD-04 closes core's menu to modules, and
-Ranks has no per-player toggle at all. Only the mechanical shape is shared.
+toggle into a shared VIP menu; a Ranks module registers a whole screen it renders
+itself (`RegisterMenuEntry`, FR-CMD-04), and Ranks has no per-player toggle at
+all. Only the mechanical shape is shared.
+
+`Unregister()` drops the module's menu entries unconditionally — an entry that
+outlives its module is a delegate into an unloaded assembly load context.
 
 It deliberately does **not** acquire the API or isolate the JIT — it cannot. A
 constructor parameter typed `IRanksApi` means the caller already holds one, so

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Ranks.Contract;
+using Ranks.WeaponStats.Menus;
 using Ranks.WeaponStats.Stats;
 using SwiftlyS2.Shared;
 
@@ -25,6 +26,7 @@ internal sealed class RanksBridge
 {
     private readonly ISwiftlyCore _core;
     private readonly Writer _writer;
+    private readonly WeaponStatsMenus _menus;
     private readonly ILogger _logger;
 
     // Deliberately not IRanksApi: a field of that type would make every method of this class a
@@ -32,10 +34,11 @@ internal sealed class RanksBridge
     private object? _api;
     private object? _module;
 
-    public RanksBridge(ISwiftlyCore core, Writer writer, ILogger logger)
+    public RanksBridge(ISwiftlyCore core, Writer writer, WeaponStatsMenus menus, ILogger logger)
     {
         _core = core;
         _writer = writer;
+        _menus = menus;
         _logger = logger;
     }
 
@@ -92,7 +95,7 @@ internal sealed class RanksBridge
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Attach(IRanksApi api)
     {
-        _module ??= new WeaponStatsModule(api, _core, _writer, () => CoreReady?.Invoke());
+        _module ??= new WeaponStatsModule(api, _core, _writer, _menus, () => CoreReady?.Invoke());
 
         ((WeaponStatsModule)_module).Register();
         ((WeaponStatsModule)_module).HandOverMigrations(typeof(RanksBridge).Assembly);
@@ -130,12 +133,14 @@ internal sealed class RanksBridge
 internal sealed class WeaponStatsModule : RanksModuleBase
 {
     private readonly Writer _writer;
+    private readonly WeaponStatsMenus _menus;
     private readonly Action _onCoreReady;
 
-    public WeaponStatsModule(IRanksApi api, ISwiftlyCore core, Writer writer, Action onCoreReady)
+    public WeaponStatsModule(IRanksApi api, ISwiftlyCore core, Writer writer, WeaponStatsMenus menus, Action onCoreReady)
         : base(api, core)
     {
         _writer = writer;
+        _menus = menus;
         _onCoreReady = onCoreReady;
     }
 
@@ -155,6 +160,12 @@ internal sealed class WeaponStatsModule : RanksModuleBase
     protected override void OnCoreReady()
     {
         _writer.Configure(ConnectionName, Table("ranks_weapon_stats"), Table("ranks_hit_stats"), Table("ranks_weapon_hit_stats"));
+
+        // Labels are resolved from this module's own translation file, because core ships no key
+        // for a screen it does not know exists.
+        RegisterMenuEntry(RanksMenuSections.Statistics, Core.Localizer["menu.weapons.title"], _menus.BuildWeapons, order: 10);
+        RegisterMenuEntry(RanksMenuSections.Statistics, Core.Localizer["menu.hitgroups.title"], _menus.BuildHitGroups, order: 20);
+
         _onCoreReady();
     }
 

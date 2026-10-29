@@ -5,8 +5,9 @@
 > Specified by [FR-MOD-01](../../../docs/functional-requirements.md).
 
 Per-weapon and per-hitbox tracking. The module owns its data end to end: its own
-tables, its own commands, its own config. Core's menu does not list it
-(FR-CMD-04).
+tables, its own commands, its own config. Its two screens are also listed under
+core's **Statistics** menu as `Weapon stats` and `Hit stats` (FR-CMD-04) — the
+command and the menu row open the same thing.
 
 **It awards no points.** It is a statistics module, not a scoring one — nothing
 here calls `AddPoints`, and core's ladder is unaffected by whether it is

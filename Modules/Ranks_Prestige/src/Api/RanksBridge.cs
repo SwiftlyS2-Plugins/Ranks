@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Ranks.Contract;
 using Ranks.Prestige.Config;
+using Ranks.Prestige.Menus;
 using Ranks.Prestige.Prestiging;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Players;
@@ -43,7 +44,15 @@ internal sealed class RanksBridge
         _logger = logger;
     }
 
+    // Assigned by AttachMenus during Load, which always runs before the handshake that reads it.
+    private PrestigeMenus _menus = null!;
     public bool IsAvailable { get; private set; }
+
+    /// <remarks>
+    /// Set after construction because the menus hold this bridge: the cycle has to be closed from
+    /// one side, and the bridge is the side that can hand them to core.
+    /// </remarks>
+    public void AttachMenus(PrestigeMenus menus) => _menus = menus;
 
     /// <summary>Swaps the ladder in after a config reload, then re-applies to everyone present.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -120,7 +129,7 @@ internal sealed class RanksBridge
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Attach(IRanksApi api)
     {
-        _module ??= new PrestigeModule(api, _core, _ladder, _config, _logger);
+        _module ??= new PrestigeModule(api, _core, _ladder, _config, _menus, _logger);
 
         ((PrestigeModule)_module).Register();
     }
@@ -151,20 +160,29 @@ internal sealed class RanksBridge
 internal sealed class PrestigeModule : RanksModuleBase
 {
     private readonly ILogger _logger;
+    private readonly PrestigeMenus _menus;
 
     private PrestigeLadder _ladder;
     private PrestigeConfig _config;
 
     public PrestigeModule(
-        IRanksApi api, ISwiftlyCore core, PrestigeLadder ladder, PrestigeConfig config, ILogger logger)
+        IRanksApi api, ISwiftlyCore core, PrestigeLadder ladder, PrestigeConfig config, PrestigeMenus menus, ILogger logger)
         : base(api, core)
     {
         _ladder = ladder;
         _config = config;
+        _menus = menus;
         _logger = logger;
     }
 
     public override string ModuleId => "Ranks_Prestige";
+
+    /// <remarks>
+    /// The label is this module's own translation — core ships no key for a screen it does not
+    /// know exists.
+    /// </remarks>
+    protected override void OnCoreReady() =>
+        RegisterMenuEntry(RanksMenuSections.Statistics, Core.Localizer["menu.prestige.title"], _menus.Build, order: 40);
 
     public void Refresh(PrestigeLadder ladder, PrestigeConfig config)
     {

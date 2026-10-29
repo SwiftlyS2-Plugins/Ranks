@@ -27,9 +27,7 @@ internal sealed class CommandsConfig
     public const string Ranks = "ranks";
     public const string Top = "top";
     public const string Stats = "stats";
-    public const string Settings = "settings";
     public const string ResetMyRank = "resetmyrank";
-    public const string TogglePointMsg = "togglepointmsg";
     public const string SetPoints = "setpoints";
     public const string GivePoints = "givepoints";
     public const string RemovePoints = "removepoints";
@@ -44,9 +42,7 @@ internal sealed class CommandsConfig
         [Ranks] = new() { Command = "ranks", Aliases = ["ranklist"] },
         [Top] = new() { Command = "top", Aliases = ["ranktop"] },
         [Stats] = new() { Command = "stats", Aliases = ["mystats"] },
-        [Settings] = new() { Command = "settings", Aliases = ["options"] },
         [ResetMyRank] = new() { Command = "resetmyrank" },
-        [TogglePointMsg] = new() { Command = "togglepointmsg" },
         [SetPoints] = new() { Command = "setpoints", Permission = AdminPermission },
         [GivePoints] = new() { Command = "givepoints", Permission = AdminPermission },
         [RemovePoints] = new() { Command = "removepoints", Permission = AdminPermission },

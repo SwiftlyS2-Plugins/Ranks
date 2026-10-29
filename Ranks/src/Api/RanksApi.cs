@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Ranks.Config;
 using Ranks.Contract;
 using Ranks.Database;
+using Ranks.Menus;
 using Ranks.Players;
 using Ranks.Ranking;
 using Ranks.Scoreboard;
@@ -28,6 +29,7 @@ internal sealed class RanksApi : IRanksApi
     private readonly ScoreboardService _scoreboard;
     private readonly PlayerStore _store;
     private readonly SchemaMigrator _migrator;
+    private readonly MenuEntryRegistry _menuEntries;
     private readonly TableNames _tables;
     private readonly DatabaseConnection _database;
     private readonly RanksEventHub _events;
@@ -43,6 +45,7 @@ internal sealed class RanksApi : IRanksApi
         ScoreboardService scoreboard,
         PlayerStore store,
         SchemaMigrator migrator,
+        MenuEntryRegistry menuEntries,
         TableNames tables,
         DatabaseConnection database,
         RanksEventHub events,
@@ -57,6 +60,7 @@ internal sealed class RanksApi : IRanksApi
         _scoreboard = scoreboard;
         _store = store;
         _migrator = migrator;
+        _menuEntries = menuEntries;
         _tables = tables;
         _database = database;
         _events = events;
@@ -265,6 +269,10 @@ internal sealed class RanksApi : IRanksApi
     public string ResolveTableName(string baseName) => _tables.Resolve(baseName);
 
     public void RegisterMigrations(Assembly assembly, string pluginId) => _migrator.Register(assembly, pluginId);
+
+    public void RegisterMenuEntry(string moduleId, RanksMenuEntry entry) => _menuEntries.Add(moduleId, entry);
+
+    public void UnregisterMenuEntries(string moduleId) => _menuEntries.RemoveAll(moduleId);
 
     public void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay)
     {

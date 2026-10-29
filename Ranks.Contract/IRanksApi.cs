@@ -107,6 +107,23 @@ public interface IRanksApi
     /// </remarks>
     void RegisterMigrations(Assembly assembly, string pluginId);
 
+    // ---- FR-CMD-04 menu composition ------------------------------------------
+
+    /// <summary>Adds one line to core's menu, under the section the entry names.</summary>
+    /// <remarks>
+    /// Call from the handshake, after core is ready. Entries are keyed on
+    /// (<paramref name="moduleId"/>, <c>Section</c>, <c>Label</c>), so re-registering the same row
+    /// after a config reload replaces it rather than doubling it.
+    ///
+    /// Core never names a module type: it holds the delegate and a string, both declared here.
+    /// That is also why <see cref="UnregisterMenuEntries"/> is not optional — an entry outliving
+    /// its module is a delegate into an unloaded assembly.
+    /// </remarks>
+    void RegisterMenuEntry(string moduleId, RanksMenuEntry entry);
+
+    /// <summary>Drops every entry a module registered. Idempotent.</summary>
+    void UnregisterMenuEntries(string moduleId);
+
     // ---- FR-API-07 scoreboard display overlay --------------------------------
 
     /// <summary>Overlays what the scoreboard shows for one player, leaving stored points alone.</summary>

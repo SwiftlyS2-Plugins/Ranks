@@ -9,9 +9,15 @@
 
   "command.combos.help": "Shows the combos you have landed.",
 
-  "combos.none": "{lightred}You have not landed any combos yet.",
-  "combos.header": "{lime}Your combos:",
-  "combos.row": " {grey}- {default}{0}{grey}: {lime}{1}",
+  // ---- Menu ---------------------------------------------------------------
+  //
+  // The title doubles as the label core shows under its Statistics menu, so renaming it renames
+  // the row there too.
+
+  "menu.combos.title": "Combos",
+  "menu.combos.empty": "You have not landed any combos yet.",
+  "menu.combos.row": "{0}: {1}",
+  "menu.combos.error": "Combo statistics are unavailable right now.",
 
   // Matching the combos in resources/examples/combos.jsonc.
   "combo.noscope_hs": "{lime}No-scope headshot",

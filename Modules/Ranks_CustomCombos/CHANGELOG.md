@@ -28,6 +28,7 @@ or in place of it.
 - `SuppressCoreAwards` makes a matched combo the whole award for that kill instead of a
   bonus on top.
 - Where several combos match, the most specific one pays — ties resolve by config order.
-- Per-combo counters, readable with `!combos` (alias `!mycombos`) and through the published
+- Per-combo counters in a paged menu, opened with `!combos` (alias `!mycombos`) or from
+  core's `!rank` → Statistics, and readable through the published
   `Ranks.CustomCombos.Api.v1`.
 - Ships no combos by default; `resources/examples/combos.jsonc` has a starting set.

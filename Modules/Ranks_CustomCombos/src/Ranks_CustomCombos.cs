@@ -5,6 +5,7 @@ using Ranks.CustomCombos.Api;
 using Ranks.CustomCombos.Combos;
 using Ranks.CustomCombos.Commands;
 using Ranks.CustomCombos.Config;
+using Ranks.CustomCombos.Menus;
 using Ranks.CustomCombos.Contract;
 using Ranks.CustomCombos.Stats;
 using SwiftlyS2.Shared;
@@ -31,6 +32,7 @@ public sealed class RanksCustomCombos : BasePlugin
     private RoundWatcher _rounds = null!;
     private RanksBridge _bridge = null!;
     private CustomCombosApi _api = null!;
+    private ComboMenus _menus = null!;
     private bool _contractLoadFailed;
 
     private CancellationTokenSource? _flushTimer;
@@ -51,11 +53,12 @@ public sealed class RanksCustomCombos : BasePlugin
         var matcher = ComboMatcher.Build(_config, _logger);
 
         _api = new CustomCombosApi(Core, _writer, _counters, matcher, _logger);
-        _commands = new ComboCommands(Core, _api, _logger);
+        _menus = new ComboMenus(Core, _api, _logger);
+        _commands = new ComboCommands(Core, _menus, _logger);
 
         // The arbiter itself is built inside the bridge: it implements a contract interface, so
         // naming it here would resolve Ranks.Contract on a server with no Ranks installed.
-        _bridge = new RanksBridge(Core, _writer, _counters, matcher, _config.SuppressCoreAwards, _logger);
+        _bridge = new RanksBridge(Core, _writer, _counters, _menus, matcher, _config.SuppressCoreAwards, _logger);
         _bridge.CoreReady += OnRanksReady;
 
         _rounds = new RoundWatcher(() => { if (_bridge.IsAvailable) _bridge.ResetRound(); });

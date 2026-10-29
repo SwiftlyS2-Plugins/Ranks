@@ -170,7 +170,7 @@ public sealed class PointsOptions
     /// <remarks>Buffers the per-action lines and emits one aggregated line at round end instead.</remarks>
     public bool RoundEndSummary { get; set; } = false;
 
-    /// <remarks>The server default; a player overrides it for themselves with <c>!togglepointmsg</c>.</remarks>
+    /// <remarks>The server default; a player overrides it under Settings in the <c>!rank</c> menu.</remarks>
     public bool ShowPointMessages { get; set; } = true;
 
     public bool ShowRankChangeMessages { get; set; } = true;

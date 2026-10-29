@@ -17,9 +17,8 @@ internal sealed class DatabaseConfig
 
 internal sealed class DisplayConfig
 {
-    [Description("How many weapons to list in !weaponstats.")]
-    public int TopWeapons { get; set; } = 10;
-
+    // TopWeapons was removed with the chat listing it capped: the menu pages instead, so a limit
+    // would only hide weapons behind no affordance at all.
     [Description("Hide weapons with fewer shots than this, so one stray shot does not fill the list.")]
     public int MinShotsToList { get; set; } = 10;
 }
@@ -45,7 +44,6 @@ internal sealed class WeaponStatsConfig
     public void Clamp()
     {
         Database.FlushIntervalSeconds = Math.Max(0, Database.FlushIntervalSeconds);
-        Display.TopWeapons = Math.Clamp(Display.TopWeapons, 1, 50);
         Display.MinShotsToList = Math.Max(0, Display.MinShotsToList);
     }
 }

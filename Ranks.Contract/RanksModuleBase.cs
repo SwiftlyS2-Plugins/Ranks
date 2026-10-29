@@ -1,14 +1,14 @@
 using System.Reflection;
 using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Players;
 
 namespace Ranks.Contract;
 
 /// <summary>Data and lifecycle base for a Ranks module.</summary>
 /// <remarks>
-/// Deliberately not a feature base: FR-CMD-04 closes core's menu to modules, so there is no
-/// per-player toggle and no menu registration here. Acquisition and the JIT isolation stay in the
-/// module's own BasePlugin — a constructor parameter typed <see cref="IRanksApi"/> means the
-/// caller already holds one (FR-API-08).
+/// Acquisition and the JIT isolation stay in the module's own BasePlugin — a constructor parameter
+/// typed <see cref="IRanksApi"/> means the caller already holds one (FR-API-08).
 /// </remarks>
 public abstract class RanksModuleBase
 {
@@ -34,6 +34,20 @@ public abstract class RanksModuleBase
 
     /// <summary>Hands this module's migrations to core, which owns the runner (FR-DB-05).</summary>
     protected void RegisterMigrations(Assembly assembly) => Api.RegisterMigrations(assembly, ModuleId);
+
+    /// <summary>Hangs one line off core's menu (FR-CMD-04).</summary>
+    /// <remarks>
+    /// <see cref="Unregister"/> drops it again, so an override that registers here needs no
+    /// matching teardown of its own.
+    /// </remarks>
+    protected void RegisterMenuEntry(string section, string label, Func<IPlayer, IMenu?> build, int order = 0) =>
+        Api.RegisterMenuEntry(ModuleId, new RanksMenuEntry
+        {
+            Section = section,
+            Label = label,
+            Build = build,
+            Order = order,
+        });
 
     /// <remarks>Every handler below is raised on the game thread, so an override may touch players directly.</remarks>
     protected virtual void OnCoreReady() { }
@@ -93,6 +107,9 @@ public abstract class RanksModuleBase
         Api.PlayersPurged -= OnPlayersPurged;
         Api.MaintenanceDue -= OnMaintenanceDue;
         Api.CoreReady -= RaiseCoreReady;
+
+        // Unconditional: an entry left behind is a delegate into an assembly that is about to go.
+        Api.UnregisterMenuEntries(ModuleId);
     }
 
     /// <remarks>Guarded separately from <see cref="Register"/>: a re-register after core came up must not re-run it.</remarks>

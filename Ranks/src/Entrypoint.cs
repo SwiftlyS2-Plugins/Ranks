@@ -45,6 +45,8 @@ public sealed partial class Ranks : BasePlugin
     private AwardPipeline _awards = null!;
     private ScoringHandlers _scoring = null!;
     private ScoreboardService _scoreboard = null!;
+    private PlayerReset _reset = null!;
+    private MenuEntryRegistry _menuEntries = null!;
     private RankMenus _menus = null!;
     private CommandRegistry _commands = null!;
     private RanksApi _api = null!;
@@ -143,13 +145,18 @@ public sealed partial class Ranks : BasePlugin
         _awards = new AwardPipeline(Core, _config, _points, _ladder, _registry, _events, _detail, _logger);
         _scoreboard = new ScoreboardService(Core, _config, _ladder, _registry, _logger);
         _scoring = new ScoringHandlers(Core, _config, _awards, _registry, _detail, _logger);
-        _menus = new RankMenus(Core, _ladder, _registry, _sessions, _logger);
+        _reset = new PlayerReset(_ladder, _sessions, _scoreboard);
+        _menuEntries = new MenuEntryRegistry(_logger);
 
+        // Before the menus, which read the leaderboard through it. Nothing in the API needs them
+        // back, so the order is a one-way dependency rather than a cycle to break.
         _api = new RanksApi(
             _config, _points, _registry, _sessions, _awards, _ladder, _scoreboard,
-            _store, _migrator, _tables, _database, _events, _logger);
+            _store, _migrator, _menuEntries, _tables, _database, _events, _logger);
 
-        _commands = new CommandRegistry(Core, _commandsConfig, _menus, _ladder, _registry, _sessions, _scoreboard, _api, _logger);
+        _menus = new RankMenus(Core, _ladder, _registry, _reset, _menuEntries, _api, _logger);
+
+        _commands = new CommandRegistry(Core, _commandsConfig, _menus, _registry, _reset, _api, _logger);
 
         // The scoreboard follows points rather than polling, so core never fights another plugin
         // for the clan-tag field.

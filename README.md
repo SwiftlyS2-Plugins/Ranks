@@ -36,6 +36,7 @@ ship alongside core, and writing your own touches nothing in core.
 |-------|-------------|
 | **[Installation](../../wiki/Installation)** | Install, pick a database, verify |
 | **[Commands](../../wiki/Commands)** | Player and admin commands |
+| **[Menus](../../wiki/Menus)** | The one menu tree, and what each category holds |
 | **[Configuration](../../wiki/Configuration)** | Every setting, with defaults |
 
 ## 🏆 Tuning Rank Progression

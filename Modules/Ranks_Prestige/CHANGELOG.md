@@ -28,5 +28,6 @@ left untouched.
 - A level can switch the scoreboard mode (`Premier`, `Competitive`, `Wingman`,
   `Custom`), so later prestiges can look different from earlier ones.
 - The display updates on every points change rather than on a timer.
-- `!prestige` (alias `!myprestige`) reports the current level and the points to the next.
+- `!prestige` (alias `!myprestige`) reports the current level and the points to the next,
+  as a menu that is also listed under core's `!rank` → Statistics.
 - No database and no migration: the level is derived from points core already stores.

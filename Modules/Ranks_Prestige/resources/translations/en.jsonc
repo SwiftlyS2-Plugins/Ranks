@@ -9,5 +9,8 @@
   "prestige.none": "You have not reached the first prestige yet.",
   "prestige.current": "Prestige {0} — showing {1} points.",
   "prestige.next": "{0} more points to the next prestige.",
-  "prestige.max": "You have reached the highest prestige."
+  "prestige.max": "You have reached the highest prestige.",
+
+  // Doubles as the label core shows under its Statistics menu, so renaming it renames that row.
+  "menu.prestige.title": "Prestige"
 }

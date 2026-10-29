@@ -120,7 +120,7 @@ Validate at load, clamping rather than throwing:
 | `Tracking.CountFriendlyFire` | bool, no validation — default `false` |
 | `Tracking.CountFriendlyFire` | bool, no validation — default `false` |
 | `Database.FlushIntervalSeconds` | `>= 0`; `0` disables the timer |
-| `Display.TopWeapons` | `1..50` |
+| `Display.MinShotsToList` | `>= 0` |
 | `Display.MinShotsToList` | `>= 0` |
 
 **All three `Tracking` defaults are the binder's own `default(bool)`.** That is

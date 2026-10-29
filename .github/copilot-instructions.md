@@ -206,7 +206,7 @@ tick can still be too early.
 | `Core.Configuration` | `InitializeJsonWithModel<T>()`, `GetConfigPath()` |
 | `Core.Database` | `GetConnection(name)`, `GetConnectionInfo(name)` |
 | `Core.Localizer` | Translations — see §6 |
-| `Core.MenusAPI` | `CreateBuilder()`, `OpenMenuForPlayer()` |
+| `Core.Menu` | `CreateMenu(id)` — see §11. (`Core.MenusAPI` is the `[Obsolete]` classic API) |
 | `Core.Permission` | `PlayerHasPermissions(steamId, perms)` |
 | `Core.Registrator` | `Register(instance)` — attribute discovery for non-plugin classes |
 | `Core.CSGODirectory` | Path to the `csgo/` directory |
@@ -1315,97 +1315,91 @@ var prop = _propertyCache.GetOrAdd(typeof(T), static t => t.GetProperty("Accesso
 
 ## 11. Menus & UI
 
+### Use `Core.Menu`, not `Core.MenusAPI`
+
+`Core.MenusAPI` (`IMenuManagerAPI`, `IMenuBuilderAPI`, `IMenuAPI`, `IMenuOption`)
+is **`[Obsolete]` since 1.5.0** — *"the classic menu system is deprecated and will
+be removed in future versions."* Every menu in this repo is built through
+`Core.Menu` (`IMenuService`, `IMenuBuilder`, `IMenu`, `IMenuSession`), and new
+code must be too (FR-CMD-06).
+
 ### Building
 
 ```csharp
-var menu = Core.MenusAPI.CreateBuilder()
-    .Design.SetMenuTitle(Core.Localizer["menu.rank.title"])
-    .Design.SetMenuTitleVisible(true)
-    .EnableSound()
-    .EnableExit()
-    .SetPlayerFrozen(false)
-    .Build();
-
-var button = new ButtonMenuOption(Core.Localizer["menu.rank.stats"]);
-button.Click += (sender, args) => { /* ... */ return ValueTask.CompletedTask; };
-menu.AddOption(button);
-
-Core.MenusAPI.OpenMenuForPlayer(player, menu);
+_core.Menu.CreateMenu("ranks.root")          // id doubles as the keybind scope
+    .WithTitle(_core.Localizer["menu.root.title"])
+    .WithItemsPerPage(8)
+    .Add(new TextComponent(_core.Localizer["menu.rank.XP", record.Points]))
+    .Add(new SubmenuComponent(_core.Localizer["menu.root.stats"], _ => BuildStatistics(player)))
+    .Build()
+    .Open(player);
 ```
 
-### Option types
+Ids are namespaced (`"ranks.root"`, `"ranks.stats.main"`) because a menu id is
+also its keybind configuration scope, which keeps the generated keybind file
+readable.
 
-Don't hand-roll a widget out of `ButtonMenuOption` — nine types ship:
+### Components
 
-| Option | Use |
+Don't hand-roll a widget out of `ButtonComponent`:
+
+| Component | Use |
 |---|---|
-| `TextMenuOption` | non-interactive line |
-| `ButtonMenuOption` | clickable action |
-| `ToggleMenuOption` | per-player on/off |
-| `SliderMenuOption` | numeric range with step + bar count |
-| `ChoiceMenuOption` | per-player value from a string list |
-| `InputMenuOption` | chat input with `maxLength` + `validator` |
-| `ProgressBarMenuOption` | dynamic progress display |
-| `SubmenuMenuOption` | opens another menu (eager or lazy) |
-| `SelectorMenuOption<T>` | typed prev/next selector |
+| `TextComponent` | non-interactive line |
+| `ButtonComponent` | clickable action |
+| `ToggleComponent` | on/off, with `ctx.NewValue` |
+| `SliderComponent` | numeric range |
+| `ChoiceComponent` / `SelectorComponent<T>` | cycle through values |
+| `InputComponent` | chat input |
+| `ProgressBarComponent` | progress, from a `Func` so it stays live |
+| `SubmenuComponent` | opens another menu |
+| `PagedCollectionComponent<T>` | async list — paging is built in |
+| `DividerComponent`, `SpacerComponent`, `TitleComponent` | layout |
 
-Value-carrying options raise `ValueChanged` with `args.NewValue`. The settings
-menu should use `ToggleMenuOption`, not buttons that flip a flag.
+A preference menu uses `ToggleComponent`, not buttons that flip a flag.
 
-### Sub-menus
+### Nesting
+
+**`SubmenuComponent`, never `ButtonComponent` + `Open()`.** `Open()` starts a new
+root with no back-stack, so the player's back key has nothing to return to:
 
 ```csharp
-var sub = Core.MenusAPI.CreateBuilder()
-    .Design.SetMenuTitle(Core.Localizer["menu.settings.title"])
-    .EnableExit().EnableSound()
-    .BindToParent(mainMenu)      // back button returns to mainMenu
-    .Build();
+.Add(new SubmenuComponent(label, _ => BuildChild(player)))   // lazy: rebuilt per open
 ```
 
-`SubmenuMenuOption` with a factory delegate builds lazily — use it for anything
-whose contents depend on data that may have changed.
+The factory form is what you want for anything whose contents can change. A menu
+with **no parent of its own is adopted by the entry that opened it** — the same
+mechanism that lets a module's menu (FR-CMD-04) sit under core's Statistics and
+still come back.
 
-### Gating an option
+### Loading data
 
-`Validating` runs before `Click` and can refuse with a reason — cleaner than
-checking inside the click and silently doing nothing:
+The factory runs on the **game thread and must not block**. Anything that reads
+the database goes inside `PagedCollectionComponent`, which owns its own thread
+and already pages:
 
 ```csharp
-option.Validating += (sender, args) =>
+.Add(new PagedCollectionComponent<IMenuComponent>(async () =>
 {
-    if (!Core.Permission.PlayerHasPermissions(args.Player.SteamID, ["ranks.admin"]))
-    {
-        args.Cancel = true;
-        args.CancelReason = Core.Localizer["error.no_permission"];
-    }
-};
+    try   { var rows = await _api.GetTopAsync("points", 50).ConfigureAwait(false);
+            return rows.Select(r => (IMenuComponent)new TextComponent(...)).ToList(); }
+    catch (Exception ex) { _logger.LogError(ex, "..."); return [new TextComponent(error)]; }
+}))
 ```
 
-`BeforeFormat` / `AfterFormat` rewrite rendered row text — menu colour markup is
-**HTML tags, never chat brackets** (§6).
+Catch inside the loader — an exception there otherwise surfaces as an empty menu
+with no explanation.
 
-### Closing
+### Lifetime
 
-```csharp
-Core.MenusAPI.CloseMenuForPlayer(player, menu);
-var current = Core.MenusAPI.GetCurrentMenu(player);
-```
+- **One open menu per player, across every plugin.** Opening yours closes someone
+  else's; that is normal, not an error to guard against.
+- **Released automatically on unload** — each plugin's menus are attributed to it
+  — so `Unload` needs no menu teardown.
+- A **module's contributed entry is a delegate core holds**, not a menu core owns,
+  so it needs explicit unregistration (`RanksModuleBase.Unregister` does it).
 
-Manager-level methods (`OpenMenuForPlayer` / `CloseMenuForPlayer` /
-`CloseActiveMenu` / `CloseAllMenus`) handle state and fire events.
-`IMenuAPI.ShowForPlayer` / `HideForPlayer` only change **visual display** and
-leave the menu active — don't reach for them to close something.
-
-### Manager events
-
-```csharp
-Core.MenusAPI.MenuOpened += OnMenuOpened;
-Core.MenusAPI.MenuClosed += OnMenuClosed;
-```
-
-Plain C# events on a framework singleton — **pair with `-=` in `Unload()`**,
-same rule as `Core.Event`. Per-menu `OptionHovering` fires every render frame;
-`OptionHovered` only on change. Prefer the latter.
+Menu colour markup is **HTML tags, never chat brackets** (§6).
 
 ### Clan tag updates (scoreboard)
 
@@ -1609,6 +1603,10 @@ change could have affected.
 | `PrestigeLadder` | Thresholds resolve to the highest level reached; crossing one resets the display to zero; operator order and duplicates do not change the outcome | A wrong level silently shows the wrong number to the player |
 | `ComboMatcher` | Closest match wins, ties go to config order, `RequiresNone` excludes, a count combo needs the whole run and keeps accumulating after a loss, weapon class accepts both spellings | A combo that never fires looks like the operator configured it wrong |
 | Weapon names | Both event spellings land on one row; non-weapon sources keep their bare name; unusable values become `unknown` | Stats split silently across two rows for the same gun |
+| `MenuEntryRegistry` | A module's entries die with it, and re-registering the same `(moduleId, Section, Label)` replaces rather than appends | The handshake re-runs on every other plugin's load, so an append shows the row once per reload; an entry left behind is a delegate into an unloaded assembly load context, which crashes only when someone opens that menu |
+| Menu nesting | Every parent-child link is a `SubmenuComponent`, never `ButtonComponent` + `Open()` | `Open()` starts a new root with no back-stack. The menu looks right until the player presses back and the whole tree closes |
+| `PlayerReset` | Zeroes **every** counter, including `Headshots`, `Hits` and `Misses` | A forgotten column leaves a "reset" player carrying their old accuracy, which only shows up on a stat nobody checks first. The command's copy already had this bug before the two were merged |
+| Accuracy | `Hits / (Hits + Misses)`, never `Hits / Shots` | One shotgun blast is a single trigger pull that lands several hits, so a shots-based figure quietly exceeds 100% |
 
 ### Where checking belongs instead
 

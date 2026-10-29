@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Ranks.Prestige.Api;
 using Ranks.Prestige.Config;
+using Ranks.Prestige.Menus;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Players;
@@ -9,23 +10,21 @@ namespace Ranks.Prestige.Commands;
 
 /// <summary>Registers and handles this module's own command.</summary>
 /// <remarks>
-/// The module ships its own command rather than contributing to core's <c>!rank</c> menu: core's
-/// menus are fixed, because composing them from whatever is installed is the dependency inversion
-/// FR-CMD-04 rules out.
+/// A shortcut, not a second surface: it opens the same menu core nests under <c>Statistics</c>.
 /// </remarks>
 internal sealed class PrestigeCommands
 {
     private readonly ISwiftlyCore _core;
-    private readonly RanksBridge _bridge;
+    private readonly PrestigeMenus _menus;
     private readonly ILogger _logger;
     private readonly List<Guid> _registered = [];
 
     private volatile PrestigeConfig _config;
 
-    public PrestigeCommands(ISwiftlyCore core, RanksBridge bridge, PrestigeConfig config, ILogger logger)
+    public PrestigeCommands(ISwiftlyCore core, PrestigeMenus menus, PrestigeConfig config, ILogger logger)
     {
         _core = core;
-        _bridge = bridge;
+        _menus = menus;
         _config = config;
         _logger = logger;
     }
@@ -83,32 +82,8 @@ internal sealed class PrestigeCommands
             return;
         }
 
-        if (!_config.Enabled)
-        {
-            player.SendChat(_core.Localizer["prestige.disabled"]);
-            return;
-        }
-
-        // IsAvailable is a plain bool, so reading it resolves nothing. Without this the first
-        // !prestige on a server with no Ranks installed JITs StandingFor and throws here.
-        if (!_bridge.IsAvailable)
-        {
-            player.SendChat(_core.Localizer["error.unavailable"]);
-            return;
-        }
-
-        if (_bridge.StandingFor(player) is not { } standing)
-        {
-            player.SendChat(_core.Localizer["error.unavailable"]);
-            return;
-        }
-
-        if (standing.Level == 0) player.SendChat(_core.Localizer["prestige.none"]);
-        else player.SendChat(_core.Localizer["prestige.current", standing.Level, standing.DisplayPoints]);
-
-        if (_bridge.PointsToNextFor(player) is { } remaining)
-            player.SendChat(_core.Localizer["prestige.next", remaining]);
-        else
-            player.SendChat(_core.Localizer["prestige.max"]);
+        // Every state the chat version reported — disabled, unavailable, standing — is a row in
+        // the menu, so the branching lives there rather than being duplicated here.
+        _menus.Open(player);
     }
 }

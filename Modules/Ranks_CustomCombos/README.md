@@ -205,7 +205,7 @@ wallbang headshot pays **25, not 35**. Ties go to config order.
 **Awarding**
 
 Because the claim runs through core, it gets core's gates, the VIP multiplier, one
-away-from-zero rounding, the per-player `!togglepointmsg` preference and round-end
+away-from-zero rounding, the per-player XP-messages preference and round-end
 batching for free — rather than this module reimplementing five things and drifting.
 
 That ordering is also what makes `SuppressCoreAwards` possible at all: a plugin

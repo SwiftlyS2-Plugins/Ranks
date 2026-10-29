@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.2 — one question open (Q3c, deferred to v1.1); two engine facts need live verification |
+| **Status** | Draft v0.2 — one question open (Q3c leaderboard half, deferred to v1.1); two engine facts need live verification |
 | **Plugin id** | `Ranks` |
 | **Framework** | SwiftlyS2 (`SwiftlyS2.CS2` `*-*` — newest, prereleases included; .NET 10) |
 | **Author** | Shmitzas |
@@ -212,7 +212,7 @@ a module's own toggle belongs in the module's own table.
 | Column | Type | Notes |
 |---|---|---|
 | `steam_id` | `BIGINT UNSIGNED` | **PK** |
-| `show_point_messages` | `BOOL` | `!togglepointmsg` (FR-PTS-08). Default true. |
+| `show_point_messages` | `BOOL` | The **Settings → XP messages** toggle (FR-PTS-08). Default true. |
 
 A new core preference is a new column and a new migration. That is deliberate —
 core's preference set is small and known, and a key/value table here would exist
@@ -861,7 +861,7 @@ system inside core is not the answer.
 |---|---|
 | `Points.ShowPointMessages` (default `true`) | Per-action chat lines. |
 | `Points.RoundEndSummary` (default `false`) | Buffer per-action lines and emit one aggregated summary at round end instead. |
-| Per-player override | `!togglepointmsg`, persisted in `ranks_settings`. |
+| Per-player override | The **Settings → XP messages** toggle, persisted in `ranks_settings`. |
 
 ### FR-PTS-09 — Combination scoring is a module, not core
 
@@ -1102,15 +1102,21 @@ registered at all, which is how an owner removes one.
 
 ### FR-CMD-02 — Player commands
 
+Every one is a **shortcut into a branch of the menu tree** (FR-CMD-04), not a
+surface of its own. Preferences and help deliberately have no command: they are
+reachable only from the root menu, so there is one place to look for them.
+
 | Default | Aliases | Purpose |
 |---|---|---|
-| `!rank` | `!myrank` | Main menu: current rank, points, progress to next |
-| `!ranks` | `!ranklist` | Full ladder |
-| `!top` | `!ranktop` | Leaderboard |
-| `!stats` | `!mystats` | Core statistics |
-| `!settings` | `!options` | Preference menu |
+| `!rank` | `!myrank` | The root menu — every category below hangs off it |
+| `!ranks` | `!ranklist` | Straight to the full ladder |
+| `!top` | `!ranktop` | Straight to the leaderboard |
+| `!stats` | `!mystats` | Straight to Statistics |
 | `!resetmyrank` | — | Self-reset, behind a confirmation step |
-| `!togglepointmsg` | — | Toggle point chat lines |
+
+`!resetmyrank` keeps its command because it is reachable from the server console,
+where there is no menu. The same reset is also a row under **Settings**, behind a
+confirmation screen of its own.
 
 ### FR-CMD-03 — Admin commands
 
@@ -1121,19 +1127,48 @@ registered at all, which is how an owner removes one.
 | `!removepoints <target> <amount>` | `ranks.admin` | Subtract |
 | `!resetrank <target>` | `ranks.admin` | Reset a player |
 
-### FR-CMD-04 — Menus are core's own
+### FR-CMD-04 — One menu tree, open to modules
 
-Core's menus are fixed. A module **does not** contribute entries to the `!rank`
-menu — that would make core's menu composition depend on what is installed,
-which is the inversion FR-PTS-01 rules out.
+**Reversed in v1.1.** This requirement previously read *"Menus are core's own"*
+and forbade a module from contributing entries, on the grounds that composing
+core's menu from whatever is installed is the dependency inversion FR-PTS-01
+rules out. That objection does not survive contact with the shape actually used
+(see 14.3): core holds a **delegate and a string, both declared in
+`Ranks.Contract`**, so it still names no module-defined type and references no
+module assembly. What it held back was discoverability — a player had to already
+know a module's command existed.
 
-A module that needs a UI registers its own command and builds its own menu
-(`!weaponstats` is owned by `Ranks_WeaponStats`, not surfaced by core). The
-cost is real and accepted: a player discovers module features through their
-commands rather than one unified menu tree.
+Core ships **one root menu of categories**, and everything else is a submenu
+under it:
 
-> This is the clearest thing the deferred provider design (Q3c) would buy back,
-> and the reason it is worth revisiting after v1 rather than dismissing.
+| Category | Contains |
+|---|---|
+| My rank | Rank, points, progress bar, and the full ladder |
+| Statistics | Core's own counters, plus one row per module |
+| Leaderboard | The paged top list |
+| Settings | Preferences, and self-reset behind a confirmation |
+| Help | What points are, how ranks move, which commands exist |
+
+A module registers through `RegisterMenuEntry`, naming a section and supplying a
+factory. **Core calls the factory and nests what it returns**, so the module owns
+its own layout, paging and colours; a menu with no parent of its own is adopted
+by the entry that opened it, which is what makes the back key return to core's
+menu rather than close everything.
+
+Three rules make this safe:
+
+- **Entries die with their module.** `RanksModuleBase.Unregister` drops them
+  unconditionally, because an entry outliving its module is a delegate into an
+  unloaded assembly load context.
+- **A module throwing is one greyed row, not a broken menu.** Core guards every
+  factory call and logs the module id.
+- **The factory runs on the game thread and must not block.** A module loading
+  from the database does it inside a `PagedCollectionComponent`, which is what
+  core's own leaderboard uses.
+
+A module still ships its own command, but as a shortcut to the same menu rather
+than a second surface — `!weaponstats` opens exactly what **Statistics → Weapon
+stats** opens.
 
 ### FR-CMD-05 — Translations
 
@@ -1170,24 +1205,32 @@ Three of its behaviours shape the design rather than merely enabling it:
   closes another plugin's menu, and core must not treat that as an error.
 - **Per-plugin ownership with automatic release on unload.** Everything created
   through a plugin's `IMenuService` is attributed to it and torn down when it
-  unloads, so one plugin unloading cannot disturb another's menus. This is what
-  makes FR-CMD-04's "core's menus are core's own" cheap to honour.
+  unloads, so one plugin unloading cannot disturb another's menus. A module's
+  contributed entry (FR-CMD-04) is a delegate core holds, not a menu core owns,
+  which is why it needs explicit unregistration on top of this.
 - **A menu id is also its keybind configuration scope**, so ids are namespaced
-  — `"ranks.main"`, `"ranks.top"`, `"ranks.settings"` — which keeps the
+  — `"ranks.root"`, `"ranks.top"`, `"ranks.settings"` — which keeps the
   server's generated keybind file readable.
 
 Core's menus map onto stock components; nothing here needs a custom renderer:
 
 | Surface | Component |
 |---|---|
-| `!rank` header and rank lines | `TitleComponent`, `TextComponent` |
+| Rank and statistics lines | `TitleComponent`, `TextComponent` |
 | Progress to the next band | `ProgressBarComponent` |
-| `!top` leaderboard | `PagedCollectionComponent<T>` — paging is built in |
-| `!settings` point-message toggle (FR-PTS-08) | `ToggleComponent` |
-| Navigation between the three | `SubmenuComponent` |
+| Leaderboard | `PagedCollectionComponent<T>` — paging is built in |
+| Point-message toggle (FR-PTS-08) | `ToggleComponent` |
+| Every category and module entry | `SubmenuComponent` |
+| Reset confirmation | `ButtonComponent` |
 
-`PagedCollectionComponent<T>` is the reason `!top` needs no hand-rolled paging,
-and `ToggleComponent` maps one-to-one onto `ranks_settings.show_point_messages`.
+`PagedCollectionComponent<T>` is the reason the leaderboard needs no hand-rolled
+paging, and `ToggleComponent` maps one-to-one onto
+`ranks_settings.show_point_messages`.
+
+**Nesting is `SubmenuComponent`, never `ButtonComponent` + `Open()`.** `Open()`
+starts a new root with no back-stack, so the player's back key would have nothing
+to return to — the same mechanism is what lets a module's menu sit under
+Statistics and still come back here.
 
 ---
 
@@ -1220,12 +1263,13 @@ Per-weapon and per-hitbox tracking.
   cannot be a row on a table keyed by one; misses are counted per weapon on
   `ranks_weapon_stats.misses` and overall on `ranks_players.misses`.
   `ranks_weapon_hit_stats` summed over weapons reproduces `ranks_hit_stats` exactly.
-- Commands: `!weaponstats` / `!ws`, `!hitstats` / `!hs`, owned by the module —
-  core's menu does not list them (FR-CMD-04).
-  > **Gap:** `!hitstats` is **not implemented**. The hitgroup counters are
-  > collected, stored and exposed through `IWeaponStatsApi.GetHitGroupsAsync`,
-  > but `StatsCommands.RegisterAll` registers only the `WeaponStats` key, so
-  > nothing prints them in chat.
+- Commands: `!weaponstats` / `!ws`, owned by the module. Both screens are listed
+  under core's **Statistics** menu as `Weapon stats` and `Hit stats`
+  (FR-CMD-04).
+  > **`!hitstats` was never implemented and is no longer planned.** The hitgroup
+  > counters are reachable in game through the Statistics menu row, which is what
+  > the command would have been a second route to; `IWeaponStatsApi.GetHitGroupsAsync`
+  > still serves callers outside the menu.
 - Each table needs a real PK on its natural key. Without one, MySQL's
   `ON DUPLICATE KEY UPDATE` silently inserts duplicates forever while
   PostgreSQL and SQLite reject the statement outright.
@@ -1806,11 +1850,11 @@ lifecycle base**, not a feature base.
 > **Deliberately *not* modelled on VIPCore's `VipFeatureBase`.** That class
 > exists so a player can opt into a personal perk from a shared menu — hence its
 > `FeatureType`, `FeatureState`, `OnSelectItem` and `RegisterFeature`. Ranks has
-> no per-player toggle and no shared menu: FR-CMD-04 closes core's menu to
-> modules by design. A Ranks module is a server-operator extension with its own
-> tables, commands and config, so the only thing borrowed is the mechanical
-> shape — constructor injection, `virtual` handlers, a `Register` / `Unregister`
-> pair.
+> no per-player toggle to expose that way: its menu entries are whole screens a
+> module renders itself (FR-CMD-04), not perks core switches on and off. A Ranks
+> module is a server-operator extension with its own tables, commands and config,
+> so what is borrowed is the mechanical shape — constructor injection, `virtual`
+> handlers, a `Register` / `Unregister` pair.
 
 ```csharp
 public abstract class RanksModuleBase
@@ -1880,9 +1924,10 @@ snapshots point totals over time and the one that does the same for weapon
 stats — which need core's quiet window to roll up and prune without competing
 with each other.
 
-**What is deliberately absent:** menu or feature registration (FR-CMD-04), any
-per-player toggle state, an `AddPoints` wrapper (call `Api.AddPoints`), and any
-scoring hook — a module hooks its own game events.
+**What is deliberately absent:** any per-player toggle state, an `AddPoints`
+wrapper (call `Api.AddPoints`), and any scoring hook — a module hooks its own
+game events. Menu registration *is* present (`RegisterMenuEntry`), but as a
+screen a module renders itself rather than VIPCore's per-player feature switch.
 
 **The acquisition and the `[NoInlining]` isolation above stay in the module's
 own `BasePlugin`.** The base cannot do them: a constructor parameter typed
@@ -1986,7 +2031,7 @@ module from reimplementing core:
 | `MinPlayers`, `WarmupPoints`, `BotsEnabled`, `FfaMode` | all four, from `GetPointSettings` |
 | VIP multiplier and flags | `VipMultiplier`, `VipFlags` |
 | Single away-from-zero rounding | the whole rounding rule |
-| `Points.ShowPointMessages` and the per-player `!togglepointmsg` preference | **impossible** — the per-player flag is not on `IRanksApi` |
+| `Points.ShowPointMessages` and the per-player XP-messages toggle | **impossible** — the per-player flag is not on `IRanksApi` |
 | `RoundEndSummary` batching | **impossible** — the buffer is core-internal |
 
 The last two rows are why an arbiter must not print its own chat line: it would
@@ -2110,7 +2155,7 @@ something that falls out — see the implementation guide, §3.1.
 
 | # | Question | Status |
 |---|---|---|
-| **Q3c** | Should core support **module self-registration and data-provider introspection** — modules declaring named providers core can invoke, so `!top deathrun.maps_completed` and composed `!rank` menus work without core knowing the module's schema? | **v1.1 candidate, not a blocker.** See 14.3. |
+| **Q3c** | Should core support **data-provider introspection** — modules declaring named providers core can invoke, so `!top deathrun.maps_completed` works without core knowing the module's schema? | **Still open, v1.1 candidate.** The *menu* half shipped (FR-CMD-04); this is the leaderboard half. See 14.3. |
 
 ### 14.2 Resolved
 
@@ -2135,6 +2180,7 @@ The reasoning lives in the requirement each row points to; this is the index.
 | **Q13** | Does `UseCoreRankingLogic = false` suppress third-party scoring? | No. Contention is an operator constraint, not core machinery. | FR-PTS-00 |
 | **Q14** | Per-session counters alongside lifetime? | No. CS2's own scoreboard already shows per-map combat stats. | — |
 | **Q15** | `points` as `INT` or `DECIMAL`? | `INT`. Rating modules own their own precision. | FR-MOD-05 |
+| **Q16** | May a module contribute entries to core's menu? | **Reversed 2026-10.** Was no, on dependency-inversion grounds. Core holds a delegate and a string, both declared in `Ranks.Contract`, so it names no module type — the objection did not survive the actual shape. Modules now register a menu factory core nests. | FR-CMD-04 |
 
 ### 14.3 Q3c — detail
 
@@ -2159,17 +2205,24 @@ What remains is cost, not blockage:
   database query, so it must be async, timeout-bounded and exception-guarded —
   the part VIPCore never had to solve.
 
-Sketch: `RanksProviderKind { PlayerScalar, PlayerRows, Leaderboard }` plus one
-closed row type `RanksRow(string Label, long? Number, string? Text, ulong? SteamId)`
-— loose enough to carry any module's data, typed enough for core to render and
-sort without understanding it. It would buy back the module menu entries dropped
-in FR-CMD-04.
+Sketch for the remaining half: `RanksProviderKind { PlayerScalar, Leaderboard }`
+plus one closed row type
+`RanksRow(string Label, long? Number, string? Text, ulong? SteamId)` — loose
+enough to carry any module's data, typed enough for core to render and sort
+without understanding it.
+
+> **The menu half shipped instead, and in a different shape.** FR-CMD-04 now
+> takes a **factory returning a menu**, not rows: the module renders its own
+> screen and core nests it. That dodges both costs listed above — nothing is
+> keyed by a string a player types, so there is no contract rot, and the async
+> I/O discipline lands on `PagedCollectionComponent`, which the framework
+> already owns. Neither argument transfers to the leaderboard half, where core
+> *must* understand the values to sort them, so that part stays open on its
+> original terms.
 
 **Held for v1.1** because it is purely additive — no table, contract member or
 config key changes to add it later — and because the timeout discipline is
-easier to get right against a real module than a hypothetical one. Build
-`Ranks_WeaponStats` the plain way first, then judge. Its prerequisite,
-FR-API-10, ships in v1.
+easier to get right against a real module than a hypothetical one.
 
 ### 14.4 Needs live verification
 

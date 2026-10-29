@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using Ranks.CustomCombos.Api;
 using Ranks.CustomCombos.Config;
+using Ranks.CustomCombos.Menus;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
 
@@ -15,14 +15,14 @@ namespace Ranks.CustomCombos.Commands;
 internal sealed class ComboCommands
 {
     private readonly ISwiftlyCore _core;
-    private readonly CustomCombosApi _api;
+    private readonly ComboMenus _menus;
     private readonly ILogger _logger;
     private readonly List<Guid> _registered = [];
 
-    public ComboCommands(ISwiftlyCore core, CustomCombosApi api, ILogger logger)
+    public ComboCommands(ISwiftlyCore core, ComboMenus menus, ILogger logger)
     {
         _core = core;
-        _api = api;
+        _menus = menus;
         _logger = logger;
     }
 
@@ -73,49 +73,8 @@ internal sealed class ComboCommands
     {
         if (context.Sender is not { } player) return;
 
-        var steamId = player.SteamID;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                // Already ordered by count, descending.
-                var rows = await _api.GetCombosAsync(steamId);
-
-                // Back to the game thread before touching the player: the read ran off it.
-                _core.Scheduler.NextTick(() =>
-                {
-                    if (player is not { Controller.IsValid: true }) return;
-
-                    if (rows.Count == 0)
-                    {
-                        player.SendChat(_core.Localizer["combos.none"]);
-                        return;
-                    }
-
-                    player.SendChat(_core.Localizer["combos.header"]);
-
-                    foreach (var row in rows)
-                        player.SendChat(_core.Localizer["combos.row", Describe(row.ComboKey), row.Count]);
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ranks_CustomCombos: combo query failed for {SteamId}.", steamId);
-            }
-        });
-    }
-
-    /// <remarks>Same missing-key fallback as the arbiter's chat line, for the same reason.</remarks>
-    private string Describe(string comboKey)
-    {
-        var key = $"combo.{comboKey}";
-        var resolved = _core.Localizer[key];
-
-        return string.IsNullOrEmpty(resolved)
-               || string.Equals(resolved, key, StringComparison.Ordinal)
-               || resolved.EndsWith('.' + key, StringComparison.Ordinal)
-            ? comboKey
-            : resolved;
+        // The menu's paged component owns the query and the thread it runs on, so this is a
+        // game-thread call that returns immediately.
+        _menus.Open(player);
     }
 }

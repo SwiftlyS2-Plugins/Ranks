@@ -62,7 +62,7 @@ Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
 |---------|------|---------|-------------|
 | `Tracking.CountFriendlyFire` | bool | `false` | Count hits, damage, hitgroups and kills against players on your own team |
 | `Database.FlushIntervalSeconds` | int | `120` | How often counters are written; `0` flushes only on disconnect, map change and unload |
-| `Display.TopWeapons` | int | `10` | Rows in the `!weaponstats` list |
+| `Display.MinShotsToList` | int | `10` | Hide weapons fired fewer times than this |
 | `Display.MinShotsToList` | int | `10` | Hides weapons barely touched, so one stray pistol shot does not fill the table |
 | `General.DetailedLogging` | bool | `false` | Narrates expected flow; warnings and errors print regardless |
 
@@ -81,7 +81,6 @@ Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
       "FlushIntervalSeconds": 120
     },
     "Display": {
-      "TopWeapons": 10,
       "MinShotsToList": 10
     },
     "General": {
@@ -185,7 +184,7 @@ connects.
 
 `!weaponstats` and the API both merge the stored rows with the caller's unflushed
 session delta, so a figure never lags a flush interval behind what just happened.
-`Display.TopWeapons` and `Display.MinShotsToList` shape the chat table only; the API
+`Display.MinShotsToList` shapes the menu only; the API
 returns every row.
 
 ---

@@ -7,9 +7,33 @@
   "error.players_only": "[red]That command can only be used by a player.",
   "error.unavailable": "[red]Weapon statistics are unavailable right now.",
 
-  "stats.header": "[gold]Your best weapons:",
-  "stats.empty": "You have no weapon statistics yet. Play a round and try again.",
-  "stats.row": "[lime]{0}[default] - kills [gold]{1}[default], accuracy [gold]{2}%[default], HS [gold]{3}%[default], damage [gold]{4}[default]",
+  // ---- Menus --------------------------------------------------------------
+  //
+  // The two titles double as the labels core shows under its Statistics menu, so renaming one
+  // renames the row there too.
+
+  "menu.error": "These statistics are unavailable right now.",
+
+  "menu.weapons.title": "Weapon stats",
+  "menu.weapons.empty": "You have no weapon statistics yet.",
+  "menu.weapons.row": "{0} - {1} kills, {2}% acc, {3}% HS, {4} dmg",
+
+  "menu.hitgroups.title": "Hit stats",
+  "menu.hitgroups.empty": "You have not landed any hits yet.",
+  "menu.hitgroups.row": "{0}: {1} hits ({2}%), {3} dmg",
+
+  "hitgroup.generic": "Generic",
+  "hitgroup.head": "Head",
+  "hitgroup.chest": "Chest",
+  "hitgroup.stomach": "Stomach",
+  "hitgroup.left_arm": "Left arm",
+  "hitgroup.right_arm": "Right arm",
+  "hitgroup.left_leg": "Left leg",
+  "hitgroup.right_leg": "Right leg",
+  "hitgroup.neck": "Neck",
+  "hitgroup.gear": "Gear",
+  "hitgroup.special": "Special",
+  "hitgroup.unknown": "Hitbox {0}",
 
   "command.weaponstats.help": "Show your per-weapon kills, accuracy and headshot rate."
 }

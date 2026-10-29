@@ -151,7 +151,7 @@ internal sealed class AwardPipeline
     /// <remarks>
     /// Deliberately not <see cref="AddPoints"/>: routing it here is what stops every arbiter
     /// reimplementing the gates, the VIP multiplier, the single rounding, the per-player
-    /// <c>!togglepointmsg</c> preference and round-end batching (FR-API-11). Dynamic kill scaling
+    /// XP-messages preference and round-end batching (FR-API-11). Dynamic kill scaling
     /// is left off — it prices a kill by rank gap, and a claim is already a considered number.
     /// </remarks>
     public void AwardClaim(PlayerRecord record, RanksKillClaim claim, ulong? counterparty, bool counterpartyIsBot)

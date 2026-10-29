@@ -18,7 +18,7 @@
 
   <ItemGroup>
     <!-- "*-*" = newest including prereleases, matching Ranks.csproj. The contract names only
-         IPlayer and ISwiftlyCore (FR-API-01), so it never loads the framework at runtime. -->
+         IPlayer, ISwiftlyCore and IMenu (FR-API-01), so it never loads the framework at runtime. -->
     <PackageReference Include="SwiftlyS2.CS2" Version="*-*" ExcludeAssets="runtime" PrivateAssets="all" />
   </ItemGroup>
 

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Ranks.Contract;
+using Ranks.CustomCombos.Menus;
 using Ranks.CustomCombos.Combos;
 using Ranks.CustomCombos.Stats;
 using SwiftlyS2.Shared;
@@ -27,6 +28,7 @@ internal sealed class RanksBridge
     private readonly ISwiftlyCore _core;
     private readonly Writer _writer;
     private readonly ComboCounters _counters;
+    private readonly ComboMenus _menus;
     private readonly ILogger _logger;
 
     // Deliberately not IRanksApi: a field of that type would make every method of this class a
@@ -39,11 +41,12 @@ internal sealed class RanksBridge
     private ComboMatcher _matcher;
     private bool _suppress;
 
-    public RanksBridge(ISwiftlyCore core, Writer writer, ComboCounters counters, ComboMatcher matcher, bool suppress, ILogger logger)
+    public RanksBridge(ISwiftlyCore core, Writer writer, ComboCounters counters, ComboMenus menus, ComboMatcher matcher, bool suppress, ILogger logger)
     {
         _core = core;
         _writer = writer;
         _counters = counters;
+        _menus = menus;
         _matcher = matcher;
         _suppress = suppress;
         _logger = logger;
@@ -128,7 +131,7 @@ internal sealed class RanksBridge
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Attach(IRanksApi api)
     {
-        _module ??= new CustomCombosModule(api, _core, _writer, () => CoreReady?.Invoke());
+        _module ??= new CustomCombosModule(api, _core, _writer, _menus, () => CoreReady?.Invoke());
 
         // Constructed here rather than in the plugin's Load: ComboArbiter implements a contract
         // interface, so merely naming it outside an isolated method would resolve Ranks.Contract
@@ -162,12 +165,14 @@ internal sealed class RanksBridge
 internal sealed class CustomCombosModule : RanksModuleBase
 {
     private readonly Writer _writer;
+    private readonly ComboMenus _menus;
     private readonly Action _onCoreReady;
 
-    public CustomCombosModule(IRanksApi api, ISwiftlyCore core, Writer writer, Action onCoreReady)
+    public CustomCombosModule(IRanksApi api, ISwiftlyCore core, Writer writer, ComboMenus menus, Action onCoreReady)
         : base(api, core)
     {
         _writer = writer;
+        _menus = menus;
         _onCoreReady = onCoreReady;
     }
 
@@ -179,6 +184,11 @@ internal sealed class CustomCombosModule : RanksModuleBase
     protected override void OnCoreReady()
     {
         _writer.Configure(ConnectionName, Table("ranks_combos"));
+
+        // The label is this module's own translation — core ships no key for a screen it does not
+        // know exists.
+        RegisterMenuEntry(RanksMenuSections.Statistics, Core.Localizer["menu.combos.title"], _menus.Build, order: 30);
+
         _onCoreReady();
     }
 }

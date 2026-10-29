@@ -23,10 +23,8 @@ internal sealed class CommandRegistry
     private readonly ISwiftlyCore _core;
     private readonly ConfigHost<CommandsConfig> _commands;
     private readonly RankMenus _menus;
-    private readonly RankLadder _ladder;
     private readonly PlayerRegistry _registry;
-    private readonly PlayerSessions _sessions;
-    private readonly ScoreboardService _scoreboard;
+    private readonly PlayerReset _reset;
     private readonly RanksApi _api;
     private readonly ILogger _logger;
 
@@ -36,20 +34,16 @@ internal sealed class CommandRegistry
         ISwiftlyCore core,
         ConfigHost<CommandsConfig> commands,
         RankMenus menus,
-        RankLadder ladder,
         PlayerRegistry registry,
-        PlayerSessions sessions,
-        ScoreboardService scoreboard,
+        PlayerReset reset,
         RanksApi api,
         ILogger logger)
     {
         _core = core;
         _commands = commands;
         _menus = menus;
-        _ladder = ladder;
         _registry = registry;
-        _sessions = sessions;
-        _scoreboard = scoreboard;
+        _reset = reset;
         _api = api;
         _logger = logger;
     }
@@ -106,12 +100,12 @@ internal sealed class CommandRegistry
 
     private ICommandService.CommandListener? HandlerFor(string key) => key switch
     {
-        CommandsConfig.Rank => ctx => ForPlayer(ctx, _menus.OpenRank),
+        // Each player command is a shortcut into one branch of the tree the root menu shows;
+        // preferences and help have no command at all, by design (FR-CMD-02).
+        CommandsConfig.Rank => ctx => ForPlayer(ctx, _menus.OpenRoot),
         CommandsConfig.Ranks => ctx => ForPlayer(ctx, _menus.OpenLadder),
-        CommandsConfig.Stats => ctx => ForPlayer(ctx, _menus.ShowStats),
-        CommandsConfig.Settings => ctx => ForPlayer(ctx, _menus.OpenSettings),
-        CommandsConfig.Top => OnTop,
-        CommandsConfig.TogglePointMsg => ctx => ForPlayer(ctx, TogglePointMessages),
+        CommandsConfig.Stats => ctx => ForPlayer(ctx, _menus.OpenStatistics),
+        CommandsConfig.Top => ctx => ForPlayer(ctx, _menus.OpenTop),
         CommandsConfig.ResetMyRank => ctx => ForPlayer(ctx, ResetSelf),
         CommandsConfig.SetPoints => ctx => AdjustPoints(ctx, AdjustMode.Set),
         CommandsConfig.GivePoints => ctx => AdjustPoints(ctx, AdjustMode.Add),
@@ -135,27 +129,6 @@ internal sealed class CommandRegistry
         action(player);
     }
 
-    private void OnTop(ICommandContext ctx) => ForPlayer(ctx, player =>
-        _menus.OpenTop(player, async () =>
-        {
-            var entries = await _api.GetTopAsync("points", 50).ConfigureAwait(false);
-
-            return entries.Select(e => (e.Position, e.Name, e.Value)).ToList();
-        }));
-
-    private void TogglePointMessages(IPlayer player)
-    {
-        if (_registry.BySlot(player.Slot) is not { } record)
-        {
-            Chat.Send(_core, player, "error.not_loaded");
-            return;
-        }
-
-        record.ShowPointMessages = !record.ShowPointMessages;
-        record.Dirty = true;
-
-            Chat.Send(_core, player, record.ShowPointMessages ? "settings.XP_messages_on" : "settings.XP_messages_off");
-    }
 
     /// <remarks>
     /// Two-step by design: the first call arms, the second within the window commits. A menu
@@ -174,7 +147,7 @@ internal sealed class CommandRegistry
         if (_pendingResets.TryGetValue(record.SteamId, out var armedAt) && now - armedAt < ResetConfirmWindow)
         {
             _pendingResets.Remove(record.SteamId);
-            ResetRecord(record);
+            _reset.Apply(record);
             Chat.Send(_core, player, "reset.done");
             return;
         }
@@ -226,7 +199,7 @@ internal sealed class CommandRegistry
         {
             if (_registry.BySlot(target.Slot) is not { } record) continue;
 
-            ResetRecord(record);
+            _reset.Apply(record);
             ctx.Reply(_core.Localizer["admin.reset", record.Name]);
         }
     }
@@ -241,29 +214,6 @@ internal sealed class CommandRegistry
         if (matches.Length == 0) ctx.Reply(_core.Localizer["admin.no_target", pattern]);
 
         return matches;
-    }
-
-    /// <remarks>
-    /// Resets points and the counters alike. The row is kept rather than deleted so first_seen
-    /// survives and the player is not treated as new on their next connect.
-    /// </remarks>
-    private void ResetRecord(PlayerRecord record)
-    {
-        record.Points = 0;
-        record.Kills = 0;
-        record.Deaths = 0;
-        record.Assists = 0;
-        record.RoundWins = 0;
-        record.RoundLosses = 0;
-        record.MatchWins = 0;
-        record.MatchLosses = 0;
-        record.BombsPlanted = 0;
-        record.BombsDefused = 0;
-        record.RankIndex = _ladder.IndexFor(0);
-        record.Dirty = true;
-
-        _ = _sessions.SavePlayerAsync(record.SteamId);
-        _scoreboard.Apply(record.SteamId);
     }
 
     private enum AdjustMode

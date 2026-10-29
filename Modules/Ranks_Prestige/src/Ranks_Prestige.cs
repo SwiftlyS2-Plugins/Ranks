@@ -4,6 +4,7 @@ using Microsoft.Extensions.Primitives;
 using Ranks.Prestige.Api;
 using Ranks.Prestige.Commands;
 using Ranks.Prestige.Config;
+using Ranks.Prestige.Menus;
 using Ranks.Prestige.Prestiging;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Plugins;
@@ -23,6 +24,7 @@ public sealed class RanksPrestige : BasePlugin
     private PrestigeConfig _config = null!;
     private CommandsConfig _commandsConfig = null!;
     private PrestigeCommands _commands = null!;
+    private PrestigeMenus _menus = null!;
     private RanksBridge _bridge = null!;
     private bool _contractLoadFailed;
 
@@ -39,7 +41,9 @@ public sealed class RanksPrestige : BasePlugin
         var ladder = PrestigeLadder.Build(_config, _logger);
 
         _bridge = new RanksBridge(Core, ladder, _config, _logger);
-        _commands = new PrestigeCommands(Core, _bridge, _config, _logger);
+        _menus = new PrestigeMenus(Core, _bridge, _config);
+        _bridge.AttachMenus(_menus);
+        _commands = new PrestigeCommands(Core, _menus, _config, _logger);
 
         _commands.RegisterAll(_commandsConfig);
     }
@@ -135,6 +139,7 @@ public sealed class RanksPrestige : BasePlugin
 
             _config = incoming;
             _commands?.UpdateConfig(incoming);
+        _menus?.UpdateConfig(incoming);
             _bridge?.UpdateLadder(PrestigeLadder.Build(incoming, _logger), incoming);
         });
     }

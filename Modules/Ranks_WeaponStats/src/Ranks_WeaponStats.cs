@@ -5,6 +5,7 @@ using Ranks.WeaponStats.Contract;
 using Ranks.WeaponStats.Api;
 using Ranks.WeaponStats.Commands;
 using Ranks.WeaponStats.Config;
+using Ranks.WeaponStats.Menus;
 using Ranks.WeaponStats.Stats;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Events;
@@ -27,6 +28,7 @@ public sealed class RanksWeaponStats : BasePlugin
     private Writer _writer = null!;
     private Collector _collector = null!;
     private StatsCommands _commands = null!;
+    private WeaponStatsMenus _menus = null!;
     private RanksBridge _bridge = null!;
     private WeaponStatsApi _api = null!;
 
@@ -48,10 +50,14 @@ public sealed class RanksWeaponStats : BasePlugin
 
         _writer = new Writer(Core, _logger);
         _collector = new Collector(Core, _config, _logger);
-        _commands = new StatsCommands(Core, _writer, _config, _logger);
-        _bridge = new RanksBridge(Core, _writer, _logger);
-        _bridge.CoreReady += OnRanksReady;
+
+        // The API comes first now: the menus read through it, and the command and the bridge both
+        // hand the same menus on, so nothing downstream can build a second view of these numbers.
         _api = new WeaponStatsApi(Core, _writer, _collector, _logger);
+        _menus = new WeaponStatsMenus(Core, _api, _config, _logger);
+        _commands = new StatsCommands(Core, _writer, _menus, _logger);
+        _bridge = new RanksBridge(Core, _writer, _menus, _logger);
+        _bridge.CoreReady += OnRanksReady;
 
         // Exactly once. Registering twice double-counts every shot.
         Core.Registrator.Register(_collector);
@@ -186,7 +192,7 @@ public sealed class RanksWeaponStats : BasePlugin
 
             _config = incoming;
             _collector?.UpdateConfig(incoming);
-            _commands?.UpdateConfig(incoming);
+            _menus?.UpdateConfig(incoming);
         });
     }
 

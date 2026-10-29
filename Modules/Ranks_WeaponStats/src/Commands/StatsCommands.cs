@@ -1,36 +1,32 @@
 using Microsoft.Extensions.Logging;
 using Ranks.WeaponStats.Config;
+using Ranks.WeaponStats.Menus;
 using Ranks.WeaponStats.Stats;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
-using SwiftlyS2.Shared.Players;
 
 namespace Ranks.WeaponStats.Commands;
 
 /// <summary>Registers and handles this module's own command.</summary>
 /// <remarks>
-/// The module ships its own command rather than contributing to core's <c>!rank</c> menu: core's
-/// menus are fixed, because composing them from whatever is installed is the dependency inversion
-/// FR-CMD-04 rules out.
+/// A shortcut, not a second surface: it opens the same menu core nests under <c>Statistics</c>,
+/// so the two can never disagree about what a weapon's numbers are.
 /// </remarks>
 internal sealed class StatsCommands
 {
     private readonly ISwiftlyCore _core;
     private readonly Writer _writer;
+    private readonly WeaponStatsMenus _menus;
     private readonly ILogger _logger;
     private readonly List<Guid> _registered = [];
 
-    private volatile WeaponStatsConfig _config;
-
-    public StatsCommands(ISwiftlyCore core, Writer writer, WeaponStatsConfig config, ILogger logger)
+    public StatsCommands(ISwiftlyCore core, Writer writer, WeaponStatsMenus menus, ILogger logger)
     {
         _core = core;
         _writer = writer;
-        _config = config;
+        _menus = menus;
         _logger = logger;
     }
-
-    public void UpdateConfig(WeaponStatsConfig config) => _config = config;
 
     public void RegisterAll(CommandsConfig commands)
     {
@@ -89,53 +85,8 @@ internal sealed class StatsCommands
             return;
         }
 
-        var config = _config;
-        var steamId = player.SteamID;
-
-        // Off the game thread, then back: the query is database I/O, and the reply needs the
-        // player again afterwards.
-        Task.Run(() =>
-        {
-            try
-            {
-                var rows = _writer.Top(steamId, config.Display.TopWeapons, config.Display.MinShotsToList);
-
-                _core.Scheduler.NextTick(() => Reply(steamId, rows));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ranks_WeaponStats: weapon stats query failed for {SteamId}.", steamId);
-            }
-        });
+        // No Task.Run here any more: the menu's paged component owns the query and the thread it
+        // runs on, so opening is a game-thread call that returns immediately.
+        _menus.OpenWeapons(player);
     }
-
-    private void Reply(ulong steamId, List<(string Weapon, long Shots, long Hits, long Misses, long Damage, long Kills, long Deaths, long Headshots)> rows)
-    {
-        var player = _core.PlayerManager.GetPlayerFromSteamId(steamId, allowUnauthorized: false);
-        if (player is null) return;
-
-        // A player with no rows gets a line saying so, not an empty table.
-        if (rows.Count == 0)
-        {
-            player.SendChat(_core.Localizer["stats.empty"]);
-            return;
-        }
-
-        player.SendChat(_core.Localizer["stats.header"]);
-
-        foreach (var row in rows)
-        {
-            var accuracy = row.Shots == 0 ? 0 : Math.Round(row.Hits * 100.0 / row.Shots, 1);
-            var headshotRate = row.Kills == 0 ? 0 : Math.Round(row.Headshots * 100.0 / row.Kills, 1);
-
-            player.SendChat(_core.Localizer["stats.row", Display(row.Weapon), row.Kills, accuracy, headshotRate, row.Damage]);
-        }
-    }
-
-    /// <remarks>
-    /// Strips the stored designer-name prefix for display only. The stored form stays
-    /// <c>weapon_ak47</c>, which is what the entity system, the dumps and weapon_fire all agree on.
-    /// </remarks>
-    private static string Display(string weapon) =>
-        weapon.StartsWith("weapon_", StringComparison.Ordinal) ? weapon[7..] : weapon;
 }

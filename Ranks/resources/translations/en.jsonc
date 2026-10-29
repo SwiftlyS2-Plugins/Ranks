@@ -28,11 +28,6 @@
   "rank.promoted": "[green]Rank up![default] You are now [gold]{0}[default] with [lime]{1}[default] XP.",
   "rank.demoted": "[red]Rank down.[default] You are now [gold]{0}[default] with [lime]{1}[default] XP.",
 
-  // ---- Settings -----------------------------------------------------------
-
-  "settings.XP_messages_on": "[green]XP messages enabled.",
-  "settings.XP_messages_off": "[red]XP messages disabled.",
-
   // ---- Self reset ---------------------------------------------------------
 
   "reset.confirm": "[red]This wipes your XP and statistics.[default] Type the command again within [gold]{0}[default] seconds to confirm.",
@@ -46,15 +41,17 @@
   "admin.adjusted": "[lime]{0}[default] now has [gold]{1}[default] XP.",
   "admin.reset": "[lime]{0}[default] has been reset.",
 
-  // ---- Statistics ---------------------------------------------------------
-
-  "stats.header": "[gold]Your statistics:",
-  "stats.combat": "Kills [lime]{0}[default] | Deaths [red]{1}[default] | Assists [lime]{2}[default] | K/D [gold]{3}[default]",
-  "stats.rounds": "Rounds won [lime]{0}[default] | lost [red]{1}[default]",
-  "stats.matches": "Matches won [lime]{0}[default] | lost [red]{1}[default]",
-  "stats.bombs": "Bombs planted [lime]{0}[default] | defused [lime]{1}[default]",
-
   // ---- Menus --------------------------------------------------------------
+  //
+  // The whole player-facing surface lives here: !rank opens the root and every other command is
+  // a shortcut to one of its branches. Preferences and help have no command at all.
+
+  "menu.root.title": "Ranks",
+  "menu.root.rank": "My rank",
+  "menu.root.stats": "Statistics",
+  "menu.root.top": "Leaderboard",
+  "menu.root.settings": "Settings",
+  "menu.root.help": "Help",
 
   "menu.rank.title": "Your rank",
   "menu.rank.current": "Rank: {0}",
@@ -62,19 +59,43 @@
   "menu.rank.next": "{0} in {1} XP",
   "menu.rank.top_band": "Highest rank reached",
   "menu.rank.ladder": "Show all ranks",
-  "menu.rank.stats": "Show my statistics",
 
   "menu.ladder.title": "Rank ladder",
   "menu.ladder.row": "{0} - {1} XP",
   "menu.ladder.row_current": "> {0} - {1} XP",
 
+  "menu.stats.title": "Statistics",
+  "menu.stats.main": "Main statistics",
+  "menu.stats.main_title": "Main statistics",
+  "menu.stats.kills": "Kills: {0}",
+  "menu.stats.deaths": "Deaths: {0}",
+  "menu.stats.kd": "K/D: {0}",
+  "menu.stats.assists": "Assists: {0}",
+  "menu.stats.headshots": "Headshots: {0} ({1}% of kills)",
+  "menu.stats.accuracy": "Accuracy: {0}% ({1} hit, {2} missed)",
+  "menu.stats.rounds": "Rounds: {0} won, {1} lost",
+  "menu.stats.matches": "Matches: {0} won, {1} lost",
+  "menu.stats.bombs": "Bombs: {0} planted, {1} defused",
+  "menu.stats.modules_empty": "No statistics modules are installed.",
+
   "menu.settings.title": "Settings",
   "menu.settings.XP_messages": "XP messages",
+  "menu.settings.reset": "Reset my rank",
+  "menu.settings.reset_title": "Reset my rank",
+  "menu.settings.reset_warning": "This wipes your XP and all statistics. It cannot be undone.",
+  "menu.settings.reset_confirm": "Yes, reset everything",
 
   "menu.top.title": "Leaderboard",
   "menu.top.row": "#{0} {1} - {2}",
   "menu.top.empty": "Nobody is ranked yet.",
   "menu.top.error": "The leaderboard is unavailable right now.",
+
+  "menu.help.title": "Help",
+  "menu.help.points": "Earn XP by killing, winning rounds and playing the objective.",
+  "menu.help.ranks": "XP raises your rank. Dying costs XP, so ranks can go down too.",
+  "menu.help.stats": "Statistics shows your lifetime totals, including any installed modules.",
+  "menu.help.scoreboard": "Your rank is shown beside your name on the scoreboard.",
+  "menu.help.commands": "Type !rank for this menu, !top for the leaderboard, !stats for statistics.",
 
   // ---- Command help -------------------------------------------------------
   //
@@ -82,13 +103,11 @@
 
   // Keyed on the command's key in commands.jsonc, not on the display wording — the lookup is
   // command.{key}.help, so renaming these to match "XP" would render a raw marker instead.
-  "command.rank.help": "Show your rank, XP and progress to the next band.",
+  "command.rank.help": "Open the Ranks menu.",
   "command.ranks.help": "Show the full rank ladder.",
   "command.top.help": "Show the XP leaderboard.",
-  "command.stats.help": "Show your kills, deaths and objective statistics.",
-  "command.settings.help": "Open your Ranks preferences.",
+  "command.stats.help": "Show your statistics.",
   "command.resetmyrank.help": "Reset your own XP and statistics. Requires confirmation.",
-  "command.togglepointmsg.help": "Turn your XP chat messages on or off.",
   "command.setpoints.help": "Set a player's XP to an exact value.",
   "command.givepoints.help": "Add XP to a player.",
   "command.removepoints.help": "Subtract XP from a player.",
