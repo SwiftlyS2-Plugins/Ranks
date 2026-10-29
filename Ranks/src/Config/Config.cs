@@ -56,9 +56,9 @@ public sealed class RankOptions
     public int MinPlayers { get; set; } = 4;
 
     /// <remarks>FR-PTS-05's multiplier formula assumes non-negative points, so this cannot go below zero.</remarks>
-    public int MinPoints { get; set; } = 1;
+    public int MinPoints { get; set; } = 0;
 
-    public int StartPoints { get; set; } = 1;
+    public int StartPoints { get; set; } = 0;
 
     /// <remarks>
     /// <c>false</c> discards warmup deaths outright — no award, and no counters, killstreak or

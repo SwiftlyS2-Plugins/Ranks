@@ -10,7 +10,9 @@ Three documents, three jobs:
 |---|---|
 | `functional-requirements.md` | What the plugin must do, and why each decision was taken |
 | `implementation-guide.md` *(this)* | How to build it against SwiftlyS2 1.4.13 |
-| `.github/copilot-instructions.md` | Framework rules and traps, for any work in this repo |
+| `.github/copilot-instructions.md` | Framework rules and traps that apply to any work in this repo |
+| `.github/instructions/*.instructions.md` | The same, narrowed to one area — menus, database, commands, config, translations, shared interfaces, release. An editor loads these automatically when the matching file is open; otherwise open the one you need |
+| `AGENTS.md` | Build and verify commands, for a tool that does not read `.github/` |
 
 ---
 

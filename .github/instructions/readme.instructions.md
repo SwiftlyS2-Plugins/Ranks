@@ -1,3 +1,8 @@
+---
+description: 'How to write and structure a README for this plugin and its modules. Trigger phrases: readme, documentation, docs, plugin description, install instructions, config table.'
+applyTo: '**/README.md'
+---
+
 # SwiftlyS2 Plugin README Guidelines
 
 Best practices for creating clear, professional README files for SwiftlyS2 plugins. These guidelines are framework-agnostic and apply to any SwiftlyS2 plugin documentation.
