@@ -179,7 +179,7 @@ jobs:
           # GitHub attaches "Source code (zip)" and "(tar.gz)" to the tag automatically, so only
           # the published plugin zips are uploaded here.
           gh release create "$TAG" \
-            --title "Ranks | $TAG" \
+            --title "$TAG" \
             --notes-file release-notes.md \
             --target "${{ github.sha }}" \
             "${PRERELEASE[@]}" \
