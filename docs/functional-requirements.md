@@ -76,7 +76,6 @@ ships its own numbers rather than injecting them into core's.
   play (weapon stats, point history), not to a tracked session-time value.
   No `playtime` column, no `!mytime` / `!ttop` commands.
 - Web front-ends, Discord integrations, REST APIs.
-- The **RevealAllRanks** module, which is community-maintained (§10).
 
 ---
 
@@ -1084,11 +1083,28 @@ In the per-tier icon modes (Competitive and Wingman):
 
 ### FR-SCB-04 — Visibility
 
-Core sets each player's own rank data. Making *other* players' icons visible
-requires broadcasting `CCSUsrMsg_ServerRankRevealAll` (`CS_UM_ServerRankRevealAll`,
-id 350), which is the **RevealAllRanks** module's responsibility (§10), not
-core's. `CCSUsrMsg_ServerRankUpdate` (id 352) exists alongside it and is the
-message for pushing a changed rank, should the reveal alone prove insufficient.
+A CS2 client renders only its own rank icon and its friends'. Revealing every
+player's to everyone needs `CCSUsrMsg_ServerRankRevealAll`
+(`CS_UM_ServerRankRevealAll`, id 350), and **core broadcasts it** — writing a
+rank nobody else can see is a feature half-delivered.
+`CCSUsrMsg_ServerRankUpdate` (id 352) exists alongside it and is the message for
+pushing a changed rank, should the reveal alone prove insufficient.
+
+The message is a one-shot signal with no matching "hide", so re-sending is
+always safe and the only real question is *when*. CS2 itself sends it once per
+map, which leaves a client that connected later — or dropped it — with blank
+icons for the rest of the map. `Scoreboard.Reveal` holds the three triggers that
+answer it, all on by default:
+
+| Key | Default | Fires |
+|---|---|---|
+| `OnRoundStart` | `true` | Every round start. Not freeze end: the scoreboard is already open during the freeze, so revealing after it makes the icons visibly pop in. |
+| `OnPlayerJoin` | `true` | `JoinDelaySeconds` after a player enters. A client that has only just connected is not ready to act on the reveal, and the message carries no retry. |
+| `OnRankChange` | `true` | Any rank change, broadcast rather than sent to the one player — their rank moved, so it is everyone *else's* view that is now stale. |
+
+Unlike the rest of §8 this needs no database, so it runs even when the schema
+probe (§4.6) has disabled scoring: whatever ranks CS2 already holds stay
+visible.
 
 ---
 
@@ -1253,7 +1269,7 @@ inside it. A module names its tables through `ResolveTableName`, runs its own
 FluentMigrator runner over its own assembly, and records applied state in its
 own ledger, derived by core from its plugin id (FR-API-06). It never writes a core
 table, never adds a column to one, and never touches core's ledger. A module
-that stores nothing — `Ranks_RevealAllRanks` — carries no database code at all.
+that stores nothing carries no database code at all.
 
 ### FR-MOD-01 — WeaponStats *(official)*
 
@@ -1296,13 +1312,14 @@ Periodic snapshots of each player's point total, stored as diffs.
 The same snapshot/retention model applied to WeaponStats' counters. Requires
 both `Ranks` and `WeaponStats`; logs and disables itself if either is missing.
 
-### FR-MOD-04 — RevealAllRanks *(community)*
+### FR-MOD-04 — *(retired)*
 
-Broadcasts the reveal-all user message so every player sees everyone's rank icon
-rather than only their own and their friends'. Needs no `Ranks` API surface
-beyond, optionally, re-broadcasting on `RankChanged`. Explicitly outside this
-document's delivery scope; listed so the extension points it needs are not
-designed away.
+**RevealAllRanks was absorbed into core and is no longer a module.** It was held
+out on the grounds that broadcasting a user message is a different kind of act
+from writing a schema field; in practice core already wrote a rank only its
+owner could see, so the split delivered half a feature. The behaviour now lives
+under `Scoreboard.Reveal` (FR-SCB-04). The slot is kept numbered so FR-MOD-05
+and FR-MOD-06 keep their identifiers.
 
 ### FR-MOD-05 — Rating modules *(official)*
 
@@ -1499,10 +1516,9 @@ instance.
 
 > **Without a package registry there is no version negotiation**, so after 1.0
 > the contract is **additive only**: new members may be added, nothing may be
-> renamed, removed or have its signature changed. An out-of-repo module
-> (`Ranks_RevealAllRanks`) is compiled against whatever DLL its author had, and
-> a changed signature is a `MissingMethodException` at call time rather than a
-> build error anyone sees.
+> renamed, removed or have its signature changed. An out-of-repo module is
+> compiled against whatever DLL its author had, and a changed signature is a
+> `MissingMethodException` at call time rather than a build error anyone sees.
 
 In-repo modules reference the contract project directly; out-of-repo modules
 reference a copy of the shipped DLL, kept for compilation and never packaged.
@@ -1925,12 +1941,14 @@ Four semantics are part of the contract, not implementation detail:
 
 Each member earns its place against a real module: the three database members
 serve WeaponStats, PointsHistory, WeaponStatsHistory and the rating modules;
-`OnPointsChanged` serves PointsHistory; `OnRankChanged` serves RevealAllRanks;
-`OnPlayersPurged` is what stops a module's tables orphaning rows when FR-DB-08
-purges core's; `OnMaintenanceDue` serves **both history modules** — the one that
-snapshots point totals over time and the one that does the same for weapon
-stats — which need core's quiet window to roll up and prune without competing
-with each other.
+`OnPointsChanged` serves PointsHistory; `OnRankChanged` is the one with no
+module left behind it — RevealAllRanks was absorbed into core (FR-SCB-04) — and
+stays because the contract is additive-only and a tier crossing is the obvious
+thing a display module hangs off; `OnPlayersPurged` is what stops a module's
+tables orphaning rows when FR-DB-08 purges core's; `OnMaintenanceDue` serves
+**both history modules** — the one that snapshots point totals over time and the
+one that does the same for weapon stats — which need core's quiet window to roll
+up and prune without competing with each other.
 
 **What is deliberately absent:** any per-player toggle state, an `AddPoints`
 wrapper (call `Api.AddPoints`), and any scoring hook — a module hooks its own

@@ -17,7 +17,7 @@ namespace Ranks;
 
 [PluginMetadata(
     Id = "Ranks",
-    Version = "1.0.1",
+    Version = "1.0.2",
     Name = "Ranks",
     Author = "Shmitzas",
     Description = "Extensive ranks and playtime data collection plugin.")]
@@ -45,6 +45,7 @@ public sealed partial class Ranks : BasePlugin
     private AwardPipeline _awards = null!;
     private ScoringHandlers _scoring = null!;
     private ScoreboardService _scoreboard = null!;
+    private RankRevealer _revealer = null!;
     private PlayerReset _reset = null!;
     private MenuEntryRegistry _menuEntries = null!;
     private RankMenus _menus = null!;
@@ -93,6 +94,15 @@ public sealed partial class Ranks : BasePlugin
 
         WarnIfNobodyIsScoring();
 
+        // Outside the probe gate: the reveal is a user message carrying no core data, so a schema
+        // core cannot read is no reason to stop showing the ranks CS2 already holds.
+        Core.Registrator.Register(_revealer);
+        _revealer.Start();
+
+        // A hot reload lands mid-round with players already in, and the reveal they were sent is
+        // long gone from the client's state.
+        if (hotReload) _revealer.RevealToAll();
+
         // Fires whether or not the probe passed — a module needs to know core settled either way.
         _api.MarkCoreReady();
 
@@ -107,6 +117,7 @@ public sealed partial class Ranks : BasePlugin
     public override void Unload()
     {
         _commands?.UnregisterAll();
+        _revealer?.Dispose();
         _scoreboard?.Dispose();
         _sessions?.Stop();
         _sessions?.FlushOnUnload(UnloadFlushBudget);
@@ -144,6 +155,7 @@ public sealed partial class Ranks : BasePlugin
         _sessions = new PlayerSessions(Core, _config, _store, _registry, _ladder, _events, _detail, _logger);
         _awards = new AwardPipeline(Core, _config, _points, _ladder, _registry, _events, _detail, _logger);
         _scoreboard = new ScoreboardService(Core, _config, _ladder, _registry, _logger);
+        _revealer = new RankRevealer(Core, _config, _detail, _logger);
         _scoring = new ScoringHandlers(Core, _config, _awards, _registry, _detail, _logger);
         _reset = new PlayerReset(_ladder, _sessions, _scoreboard);
         _menuEntries = new MenuEntryRegistry(_logger);
@@ -161,6 +173,7 @@ public sealed partial class Ranks : BasePlugin
         // The scoreboard follows points rather than polling, so core never fights another plugin
         // for the clan-tag field.
         _events.RankChanged += e => _scoreboard.Apply(e.SteamId);
+        _events.RankChanged += e => _revealer.OnRankChanged(e.SteamId);
         _events.PlayerDataLoaded += snapshot => _scoreboard.Apply(snapshot.SteamId);
         _scoring.RoundEnded += OnRoundEnded;
     }

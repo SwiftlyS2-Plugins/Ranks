@@ -22,6 +22,11 @@ Notable changes to Ranks, newest first.
 
 ---
 
+## [1.0.2] - 2026-10-30
+
+- Now everyone can see everyone's rank by default without any additional modules required.
+- Added `Scoreboard.Reveal` to `config.jsonc` to control when that reveal is re-sent —
+  `OnRoundStart`, `OnPlayerJoin`, `OnRankChange` and `JoinDelaySeconds`, all on by default.
 
 ## [1.0.1] - 2026-10-29
 

@@ -145,17 +145,8 @@ internal sealed class ScoreboardService : IDisposable
             var record = _registry.BySlot(player.Slot);
             if (record is null) continue;
 
-            try
-            {
-                if (player.Controller is { IsValid: true } controller)
-                    WriteRankIcon(config, controller, record, record.DisplayOverride?.Points ?? record.Points);
-            }
-            catch
-            {
-                // Swallowed, not logged: with FollowCS2ServerGuidelines on these are protected
-                // fields and every write throws, which at 64 Hz would bury every other line in the
-                // log. Apply() logs the same failure once per real scoreboard change.
-            }
+            if (player.Controller is { IsValid: true } controller)
+                WriteRankIcon(config, controller, record, record.DisplayOverride?.Points ?? record.Points);
         }
     }
 

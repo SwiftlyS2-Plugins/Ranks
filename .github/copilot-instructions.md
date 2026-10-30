@@ -1094,7 +1094,7 @@ Ranks/
 │   │   ├── Menus/
 │   │   ├── Players/                     ← record cache, load/save lifecycle
 │   │   ├── Ranking/                     ← ladder resolution
-│   │   ├── Scoreboard/                  ← rank icon, clan tag, overlay
+│   │   ├── Scoreboard/                  ← rank icon, clan tag, overlay, reveal-all
 │   │   └── Scoring/                     ← award pipeline, gates, multipliers
 │   └── resources/
 │       ├── examples/ranks-competitive.jsonc

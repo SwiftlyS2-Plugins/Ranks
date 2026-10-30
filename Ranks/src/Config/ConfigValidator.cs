@@ -23,6 +23,16 @@ internal static partial class ConfigValidator
         ClampPoints(config.Points, logger);
         ClampVip(config.Vip, logger);
         ClampRankMode(config.Scoreboard, logger);
+        ClampReveal(config.Scoreboard.Reveal, logger);
+    }
+
+    /// <remarks>Clamps rather than throws — a bad delay is a tuning error, not a data-loss risk.</remarks>
+    private static void ClampReveal(RevealOptions reveal, ILogger logger)
+    {
+        var clamped = Math.Clamp(reveal.JoinDelaySeconds, 0f, 30f);
+
+        WarnIfChanged(reveal.JoinDelaySeconds, clamped, "Scoreboard.Reveal.JoinDelaySeconds", logger);
+        reveal.JoinDelaySeconds = clamped;
     }
 
     /// <remarks>

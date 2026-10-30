@@ -131,6 +131,29 @@ public sealed class ScoreboardOptions
 
     /// <remarks>Ladder positions skipped before the first icon is used. Custom mode only.</remarks>
     public int CustomRankMargin { get; set; } = 0;
+
+    public RevealOptions Reveal { get; set; } = new();
+}
+
+/// <summary>When everyone's rank icon is revealed to everyone else (FR-SCB-04).</summary>
+/// <remarks>
+/// All three triggers default on because the reveal does not persist: CS2 sends it once at map
+/// load, so a single broadcast works for one round and then quietly stops. There is no matching
+/// "hide" message, which is why every key here is about <em>when</em> to re-send rather than what.
+/// </remarks>
+public sealed class RevealOptions
+{
+    [Description("Re-broadcast at the start of every round.")]
+    public bool OnRoundStart { get; set; } = true;
+
+    [Description("Send to a player as they join, so they see ranks without waiting for the next round.")]
+    public bool OnPlayerJoin { get; set; } = true;
+
+    [Description("Re-broadcast when a player's rank changes, since it is everyone else's view that is now stale.")]
+    public bool OnRankChange { get; set; } = true;
+
+    [Description("Seconds to wait before sending to a joining player. Too early and the client is not ready to act on it.")]
+    public float JoinDelaySeconds { get; set; } = 2.0f;
 }
 
 public sealed class PointsOptions
