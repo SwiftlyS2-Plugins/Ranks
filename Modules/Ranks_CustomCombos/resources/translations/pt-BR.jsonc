@@ -1,0 +1,72 @@
+{
+  // Ranks_CustomCombos - English.
+  //
+  // Must stay KEY-COMPLETE: a missing key renders the literal marker {lang}.{key} to the player
+  // rather than falling back to English.
+  //
+  // Keys named combo.<key> are YOURS to add — one per combo you configure. A combo with no key
+  // here still works; its chat line falls back to the bare combo name.
+
+  // Looked up as command.<name>.help, where <name> is the Command in commands.jsonc — rename the
+  // command there and this key has to follow it.
+  "command.combos.help": "Exibe os combos que você realizou.",
+
+  // ---- Menu ---------------------------------------------------------------
+  //
+  // The title doubles as the label core shows under its Statistics menu, so renaming it renames
+  // the row there too.
+
+  "menu.combos.title": "Combos",
+  "menu.combos.empty": "Você ainda não realizou nenhum combo.",
+  "menu.combos.row": "{0}: {1}",
+  "menu.combos.error": "As estatísticas de combos estão indisponíveis no momento.",
+
+  // ---- Seasons ------------------------------------------------------------
+  //
+  // Only while Ranks runs seasons (its Database.VirtualPurgeMode is 1, monthly, or
+  // VirtualPurgeDays is above zero). The combos screen then opens on this season, with an
+  // "All time" row and a "Previous seasons" row above the list. Worded like Ranks' own season
+  // rows, and short: a menu row clips at ~42 characters.
+
+  // {0} is one of the labels below, so a title reads "Combos - This season".
+  "menu.combos.title_in": "Combos - {0}",
+  "menu.combos.current": "Temporada atual",
+  "menu.combos.alltime": "Todo o período",
+  "menu.combos.previous": "Temporadas anteriores",
+  // {0} is the season's first day, as yyyy-MM-dd in UTC. Used for a season that was not
+  // exactly one calendar month.
+  "menu.combos.season": "Temporada a partir de {0}",
+  // A season that ran exactly one UTC calendar month. {0} is month.N below, {1} the year.
+  "menu.combos.month": "{0} de {1}",
+  // Everything recorded before seasons were switched on.
+  "menu.combos.initial": "Antes das temporadas",
+  "menu.combos.empty_current": "Nenhum combo realizado nesta temporada ainda.",
+  "menu.combos.empty_season": "Nenhum combo realizado nessa temporada.",
+  // Shown for "Before seasons": combos are kept per season only from when seasons were switched
+  // on, so the ones landed earlier are in the All time total instead.
+  "menu.combos.empty_initial": "Os combos antigos são contabilizados em Todo o período.",
+  "menu.combos.seasons_empty": "Ainda não há temporadas anteriores.",
+
+  // Month names for menu.combos.month, looked up as "month." + 1-12.
+  "month.1": "Janeiro",
+  "month.2": "Fevereiro",
+  "month.3": "Março",
+  "month.4": "Abril",
+  "month.5": "Maio",
+  "month.6": "Junho",
+  "month.7": "Julho",
+  "month.8": "Agosto",
+  "month.9": "Setembro",
+  "month.10": "Outubro",
+  "month.11": "Novembro",
+  "month.12": "Dezembro",
+
+  // Matching the combos in resources/examples/combos.jsonc.
+  "combo.noscope_hs": "{lime}Headshot sem mira",
+  "combo.wallbang_hs": "{lime}Headshot através da parede",
+  "combo.knife_hs": "{lime}Headshot com faca",
+  "combo.airborne_sniper": "{lime}Abate de sniper no ar",
+  "combo.blind_nade": "{lime}Abate com granada enquanto cego",
+  "combo.nade_double": "{lime}Abate duplo com granada",
+  "combo.long_noscope": "{lime}No-scope de longa distância"
+}

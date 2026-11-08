@@ -1,0 +1,275 @@
+{
+  // Ranks - English.
+  //
+  // This file must stay KEY-COMPLETE. A missing key renders the literal marker {lang}.{key} to
+  // the player rather than falling back to English, so a partial translation is worse than none.
+  //
+  // {0}, {1}, ... are positional arguments; keep them in every translation even if the word order
+  // changes. Colour tokens ([gold], [lime], [default], ...) are SwiftlyS2's chat colours.
+
+  "prefix": "[ [darkred]Ranks [default]] ",
+
+  // ---- Errors -------------------------------------------------------------
+
+  "error.players_only": "[red]Este comando só pode ser utilizado por um jogador.",
+  "error.not_loaded": "[red]Seus dados de rank ainda não foram carregados. Tente novamente em instantes.",
+
+  // ---- XP feedback -----------------------------------------------------
+
+  "XP.gained": "[lime]+{0}[default] XP [grey]({1})",
+  "XP.lost": "[red]-{0}[default] XP [grey]({1})",
+
+  // Deliberately carries no reasons: the per-event lines are what name them, and this replaces
+  // those lines rather than summarising them.
+  "XP.summary": "[default]Resumo da rodada: [gold]{0}{1}[default] XP",
+
+  // ---- Rank changes -------------------------------------------------------
+
+  "rank.promoted": "[green]Rank Promovido![default] Agora você está no rank [gold]{0}[default] com [lime]{1}[default] XP.",
+  "rank.demoted": "[red]Rank Reduzido.[default] Agora você está no rank [gold]{0}[default] com [lime]{1}[default] XP.",
+
+  // ---- Self reset ---------------------------------------------------------
+
+  "reset.confirm": "[red]Isso apagará seu XP e suas estatísticas atuais.[default] Digite o comando novamente em até [gold]{0}[default] segundos para confirmar.",
+  "reset.done": "[green]Seu rank foi redefinido.",
+
+  // ---- Playtime -----------------------------------------------------------
+  //
+  // Time connected to the server, counted as K4-LevelRanks counted it: warmup, spectating and an
+  // empty server included. {0} in the first two is a duration built from the duration.* keys.
+
+  "playtime.mine": "Você passou [gold]{0}[default] neste servidor.",
+  // Replaces playtime.mine while seasons are on, when the figure is this season's.
+  "playtime.mine_season": "Você passou [gold]{0}[default] neste servidor nesta temporada.",
+  // {0} is the player's position, {1} how many players are ranked.
+  "playtime.position": "Você está na posição [gold]#{0}[default] entre [gold]{1} jogadores[default] em tempo de jogo.",
+  "playtime.position_season": "Você está na posição [gold]#{0}[default] entre [gold]{1} jogadores[default] em tempo de jogo nesta temporada.",
+
+  // A duration, largest unit first; zero leading units are dropped. {0} days, {1} hours,
+  // {2} minutes; then {0} hours, {1} minutes; then {0} minutes.
+  "duration.days": "{0}d {1}h {2}min",
+  "duration.hours": "{0}h {1}min",
+  "duration.minutes": "{0}min",
+
+  // ---- Seasons ------------------------------------------------------------
+  //
+  // Only when seasons are on: Database.VirtualPurgeMode 1 (monthly), or VirtualPurgeDays above
+  // zero. A season is one period: everyone's rank starts over when it ends, and the season that
+  // closed stays browsable under Leaderboard.
+
+  "period.started": "[gold]Uma nova temporada começou![default] O rank de todos foi reiniciado. A classificação da temporada anterior continua disponível em [gold]Classificação[default].",
+
+  // ---- Admin --------------------------------------------------------------
+
+  "admin.usage": "[red]Uso:[default] {0} <jogador> <quantidade>",
+  // No amount: this one takes a target and nothing else.
+  "admin.usage_target": "[red]Uso:[default] {0} <jogador>",
+  "admin.bad_amount": "[red]'{0}' não é um número válido.",
+  "admin.no_target": "[red]Nenhum jogador correspondeu a '{0}'.",
+  "admin.ambiguous_target": "[red]Mais de um jogador correspondeu a '{0}'. Informe mais partes do nome, ou use o SteamID ou ID de status.",
+  "admin.not_loaded": "[red]Os dados de rank de {0} ainda não foram carregados. Tente novamente em instantes.",
+  "admin.adjusted": "[lime]{0}[default] agora possui [gold]{1}[default] XP.",
+  "admin.reset": "[lime]{0}[default] teve seu rank redefinido.",
+
+  // ---- Help ---------------------------------------------------------------
+  //
+  // Chat, not menu rows: a menu row is one centred line that clips at roughly 42 characters.
+  // Chat tags here, not HTML.
+  //
+  // {0} is the command's CONFIGURED name from commands.jsonc, without the ! prefix — so a
+  // renamed command describes itself correctly and a removed one is not listed at all. Keep the
+  // literal "!" in front of {0}.
+
+  "help.header": "[gold]Comandos disponíveis:",
+  "help.rank": "[gold]!{0} [default]- Suas estatísticas detalhadas, configurações e informações de rank",
+  "help.stats": "[gold]!{0} [default]- Seu menu de estatísticas",
+  "help.mytime": "[gold]!{0} [default]- Seu tempo de jogo neste servidor",
+  "help.ranks": "[gold]!{0} [default]- Todos os ranks disponíveis",
+  "help.top": "[gold]!{0} [default]- Classificação dos melhores jogadores. Selecione um jogador para ver suas estatísticas",
+  "help.ttop": "[gold]!{0} [default]- Classificação por tempo de jogo, com sua posição exibida no chat",
+  "help.resetmyrank": "[gold]!{0} [default]- Apaga seu próprio XP e suas estatísticas. É necessário confirmar",
+
+  // Shown only to a player who holds the permission on at least one of these, and each line only
+  // to someone who can run that command — so this never advertises something that would be
+  // refused. {0} is the configured name, as above.
+
+  "help.admin_header": "[gold]Comandos administrativos:",
+  "help.setpoints": "[gold]!{0} [grey]<Nome/SteamID/StatusID do jogador> <quantidade> [default]- Define o XP do jogador com um valor exato",
+  "help.givepoints": "[gold]!{0} [grey]<Nome/SteamID/StatusID do jogador> <quantidade> [default]- Adiciona XP ao jogador",
+  "help.removepoints": "[gold]!{0} [grey]<Nome/SteamID/StatusID do jogador> <quantidade> [default]- Remove XP do jogador",
+  "help.resetrank": "[gold]!{0} [grey]<Nome/SteamID/StatusID do jogador> [default]- Apaga o XP e as estatísticas do jogador",
+
+  // ---- Menus --------------------------------------------------------------
+  //
+  // The whole player-facing surface lives here: !rank opens the root and every other command is
+  // a shortcut to one of its branches. Preferences and help have no command at all.
+
+  "menu.root.title": "Ranks",
+  "menu.root.rank": "Meu rank",
+  "menu.root.stats": "Estatísticas",
+  "menu.root.top": "Classificação",
+  "menu.root.settings": "Configurações",
+  "menu.root.help": "Ajuda (exibida no chat)",
+  // Only rendered for a player who can run at least one admin command.
+  "menu.root.admin": "Comandos administrativos (exibidos no chat)",
+
+  "menu.rank.title": "Seu rank",
+  "menu.rank.current": "Rank: {0}",
+  "menu.rank.XP": "XP: {0}",
+  "menu.rank.next": "{0} em {1} XP",
+  "menu.rank.top_band": "Maior rank alcançado",
+  "menu.rank.ladder": "Exibir todos os ranks",
+
+  "menu.ladder.title": "Lista de ranks",
+  "menu.ladder.row": "{0} - {1} XP",
+  "menu.ladder.row_current": "> {0} - {1} XP",
+
+  "menu.stats.title": "Estatísticas",
+  "menu.stats.main": "Estatísticas principais",
+  "menu.stats.main_title": "Estatísticas principais",
+  // The three rows below replace "Main statistics" while seasons are on.
+  "menu.stats.current": "Temporada atual",
+  "menu.stats.alltime": "Estatísticas de todo o período",
+  "menu.stats.previous": "Temporadas anteriores",
+  "menu.stats.kills": "Abates: {0}",
+  "menu.stats.deaths": "Mortes: {0}",
+  "menu.stats.kd": "K/D: {0}",
+  "menu.stats.assists": "Assistências: {0}",
+  "menu.stats.headshots": "Tiros na cabeça: {0} ({1}% dos abates)",
+  "menu.stats.accuracy": "Precisão: {0}% ({1} acertos, {2} erros)",
+  "menu.stats.rounds": "Rodadas: {0} vencidas, {1} perdidas",
+  "menu.stats.matches": "Partidas: {0} vencidas, {1} perdidas",
+  "menu.stats.bombs": "Bombas: {0} plantadas, {1} desarmadas",
+  // {0} is a duration built from the duration.* keys.
+  "menu.stats.playtime": "Tempo de jogo: {0}",
+  "menu.stats.modules_empty": "Nenhum módulo de estatísticas está instalado.",
+
+  "menu.settings.title": "Configurações",
+  "menu.settings.XP_messages": "Mensagens de XP",
+  "menu.settings.reset": "Redefinir meu rank",
+  "menu.settings.reset_title": "Redefinir meu rank",
+  "menu.settings.reset_warning": "Isso apagará seu XP e suas estatísticas atuais. Essa ação não pode ser desfeita.",
+  "menu.settings.reset_confirm": "Sim, redefinir tudo",
+
+  "menu.top.title": "Classificação",
+  "menu.top.row": "#{0} {1} - {2}",
+  "menu.top.hint": "Selecione para ver as estatísticas deste jogador",
+  "menu.top.empty": "Ainda não há jogadores classificados.",
+  "menu.top.error": "A classificação está indisponível no momento.",
+  // Rows of the Leaderboard screen. Players stands for the XP board while seasons are off; with
+  // them on, the three season rows replace it.
+  "menu.top.players": "Jogadores",
+  "menu.top.current": "Temporada atual",
+  "menu.top.alltime": "Todo o período",
+  "menu.top.previous": "Temporadas anteriores",
+  "menu.top.playtime": "Tempo de jogo",
+
+  // The playtime board, opened from the Playtime row or !ttop. {0} position, {1} name, {2} a
+  // duration built from the duration.* keys.
+  "menu.toptime.title": "Maiores tempos de jogo",
+  "menu.toptime.row": "#{0} {1} - {2}",
+
+  "menu.period.title": "Temporadas anteriores",
+  // {0} is the season's first day, as yyyy-MM-dd in UTC. Used for a season that was not
+  // exactly one calendar month.
+  "menu.period.row": "Temporada a partir de {0}",
+  // A season that ran exactly one UTC calendar month. {0} is month.N below, {1} the year.
+  "menu.period.month": "{0} de {1}",
+  // Everything recorded before seasons were switched on.
+  "menu.period.initial": "Antes das temporadas",
+  // {0} is the season's last full day, yyyy-MM-dd in UTC; the next season starts at 00:00 UTC the
+  // day after. Keep it short: a line wider than the menu is cut off.
+  "menu.period.last_day": "Último dia: {0}",
+  // Replaces menu.period.last_day while the current season is a calendar month. {0} is
+  // menu.period.month. Keep it after a colon, so a language can leave the month name uninflected.
+  "menu.period.current_month": "Temporada: {0}",
+  "menu.period.empty": "Ainda não há temporadas anteriores.",
+
+  // Month names for menu.period.month, looked up as "month." + 1-12.
+  "month.1": "Janeiro",
+  "month.2": "Fevereiro",
+  "month.3": "Março",
+  "month.4": "Abril",
+  "month.5": "Maio",
+  "month.6": "Junho",
+  "month.7": "Julho",
+  "month.8": "Agosto",
+  "month.9": "Setembro",
+  "month.10": "Outubro",
+  "month.11": "Novembro",
+  "month.12": "Dezembro",
+
+  // {0} is the player's stored name.
+  "menu.playerstats.title": "{0}",
+  "menu.playerstats.empty": "Este jogador não possui estatísticas registradas.",
+
+  // ---- Command help -------------------------------------------------------
+  //
+  // Shown by sw_help. Not a config field: it is player-facing, so it is translatable.
+
+  // Keyed on the command's key in commands.jsonc, not on the display wording — the lookup is
+  // command.{key}.help, so renaming these to match "XP" would render a raw marker instead.
+  "command.rank.help": "Abre o menu de Ranks.",
+  "command.ranks.help": "Exibe a lista completa de ranks.",
+  "command.top.help": "Exibe a classificação por XP.",
+  "command.stats.help": "Exibe suas estatísticas.",
+  "command.mytime.help": "Exibe quanto tempo você jogou neste servidor.",
+  "command.ttop.help": "Exibe a classificação por tempo de jogo.",
+  "command.resetmyrank.help": "Redefine seu XP e suas estatísticas. Requer confirmação.",
+  "command.setpoints.help": "Define o XP de um jogador com um valor exato.",
+  "command.givepoints.help": "Adiciona XP a um jogador.",
+  "command.removepoints.help": "Remove XP de um jogador.",
+  "command.resetrank.help": "Redefine o XP e as estatísticas de um jogador.",
+
+  // ---- Event names --------------------------------------------------------
+  //
+  // The label shown in a XP message. Only core's own keys are translated; a module calling
+  // AddXP with its own reason string has that string shown verbatim, since core cannot ship
+  // a key for a reason it has never heard of.
+
+  "event.kill": "Abate",
+  "event.death": "Morte",
+  "event.assist": "Assistência",
+  "event.assist_flash": "Assistência com flash",
+  "event.headshot": "Tiro na cabeça",
+  "event.suicide": "Suicídio",
+  "event.team_kill": "Abate de aliado",
+  "event.team_assist": "Assistência a aliado",
+  "event.noscope": "Sem mira",
+  "event.wallbang": "Através da parede",
+  "event.through_smoke": "Através da fumaça",
+  "event.blind_kill": "Abate às cegas",
+  "event.long_distance": "Longa distância",
+  "event.knife_kill": "Abate com faca",
+  "event.taser_kill": "Abate com Zeus",
+  "event.grenade_kill": "Abate com granada",
+  "event.inferno_kill": "Abate com Molotov/Incendiária",
+  "event.impact_kill": "Abate por impacto",
+  "event.bomb_plant": "Bomba plantada",
+  "event.bomb_defuse": "Bomba desarmada",
+  "event.bomb_defuse_others": "Bomba desarmada",
+  "event.bomb_exploded": "Bomba explodida",
+  "event.bomb_pickup": "Bomba recolhida",
+  "event.bomb_drop": "Bomba largada",
+  "event.hostage_rescue": "Refém resgatado",
+  "event.hostage_rescue_all": "Todos os reféns resgatados",
+  "event.hostage_hurt": "Refém ferido",
+  "event.hostage_kill": "Refém morto",
+  "event.round_win": "Rodada vencida",
+  "event.round_lose": "Rodada perdida",
+  "event.mvp": "MVP",
+  "event.match_win": "Partida vencida",
+  "event.match_lose": "Partida perdida",
+
+  "event.streak.double": "Abate duplo",
+  "event.streak.triple": "Abate triplo",
+  "event.streak.domination": "Dominação",
+  "event.streak.rampage": "Massacre",
+  "event.streak.mega": "Mega abate",
+  "event.streak.ownage": "Aniquilação",
+  "event.streak.ultra": "Abate ultra",
+  "event.streak.killing_spree": "Sequência de abates",
+  "event.streak.monster": "Abate monstruoso",
+  "event.streak.unstoppable": "Imparável",
+  "event.streak.godlike": "DIVINO"
+}

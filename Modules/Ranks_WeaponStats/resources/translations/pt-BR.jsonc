@@ -1,0 +1,89 @@
+{
+  // Ranks_WeaponStats - English.
+  //
+  // Must stay KEY-COMPLETE: a missing key renders the literal marker {lang}.{key} to the player
+  // rather than falling back to English.
+
+  "error.players_only": "[red]Esse comando só pode ser utilizado por um jogador.",
+  "error.unavailable": "[red]As estatísticas de armas estão indisponíveis no momento.",
+
+  // ---- Menus --------------------------------------------------------------
+  //
+  // The two titles double as the labels core shows under its Statistics menu, so renaming one
+  // renames the row there too.
+
+  "menu.error": "Essas estatísticas estão indisponíveis no momento.",
+
+  "menu.weapons.title": "Estatísticas de armas",
+  "menu.weapons.empty": "Você ainda não possui estatísticas de armas.",
+  "menu.weapons.hint": "Selecione para ver onde os tiros desta arma acertaram",
+  // Rows are one centred line and clip at roughly 42 characters, so damage is left to the API.
+  "menu.weapons.row": "{0} | {1} Abates, {2}% HS, {3}% Precisão",
+
+  "menu.hitgroups.title": "Estatísticas gerais de acertos",
+  "menu.hitgroups.empty": "Você ainda não acertou nenhum tiro.",
+  "menu.hitgroups.row": "{0}: {1} acertos ({2}%), {3} de dano",
+
+  // {0} is the weapon, already stripped of its weapon_ prefix and upper-cased.
+  "menu.weaponhits.title": "{0} - Estatísticas de acertos",
+
+  // ---- Seasons ------------------------------------------------------------
+  //
+  // Only while core runs seasons (VirtualPurgeMode 1, monthly, or VirtualPurgeDays above zero).
+  // Both rows under Statistics then open on these three choices; with seasons off they open their
+  // lists exactly as before. The wording matches core's own season screens.
+
+  "menu.period.current": "Temporada Atual",
+  "menu.period.alltime": "Todo Período",
+  "menu.period.previous": "Temporadas Anteriores",
+
+  "menu.period.title": "Temporadas anteriores",
+  // {0} is the season's first day, as yyyy-MM-dd in UTC. Used for a season that was not
+  // exactly one calendar month.
+  "menu.period.row": "Temporada a partir de {0}",
+  // A season that ran exactly one UTC calendar month. {0} is month.N below, {1} the year.
+  "menu.period.month": "{0} de {1}",
+  // Everything recorded before seasons were switched on. Nothing was kept per season then, so this
+  // one always opens empty here; those figures are all under All time.
+  "menu.period.initial": "Antes das temporadas",
+  "menu.period.empty": "Ainda não há temporadas anteriores.",
+
+  // Month names for menu.period.month, looked up as "month." + 1-12.
+  "month.1": "Janeiro",
+  "month.2": "Fevereiro",
+  "month.3": "Março",
+  "month.4": "Abril",
+  "month.5": "Maio",
+  "month.6": "Junho",
+  "month.7": "Julho",
+  "month.8": "Agosto",
+  "month.9": "Setembro",
+  "month.10": "Outubro",
+  "month.11": "Novembro",
+  "month.12": "Dezembro",
+
+  // {0} is one of the season labels above.
+  "menu.weapons.title_period": "Estatísticas de armas - {0}",
+  "menu.weapons.empty_period": "Nenhuma estatística de armas nesta temporada.",
+  "menu.hitgroups.title_period": "Estatísticas de acertos - {0}",
+  "menu.hitgroups.empty_period": "Nenhum tiro acertado nesta temporada.",
+  // {0} is the weapon as in menu.weaponhits.title, {1} one of the season labels above.
+  "menu.weaponhits.title_period": "{0} - {1}",
+
+  "hitgroup.generic": "Genérico",
+  "hitgroup.head": "Cabeça",
+  "hitgroup.chest": "Peito",
+  "hitgroup.stomach": "Estômago",
+  "hitgroup.left_arm": "Braço Esquerdo",
+  "hitgroup.right_arm": "Braço Direito",
+  "hitgroup.left_leg": "Perna Esquerda",
+  "hitgroup.right_leg": "Perna Direita",
+  "hitgroup.neck": "Pescoço",
+  "hitgroup.gear": "Equipamento",
+  "hitgroup.special": "Especial",
+  "hitgroup.unknown": "Área de acerto {0}",
+
+  // Looked up as command.<name>.help, where <name> is the Command in commands.jsonc — rename the
+  // command there and this key has to follow it.
+  "command.weaponstats.help": "Exibe seus abates por arma, precisão e taxa de tiros na cabeça."
+}
