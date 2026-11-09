@@ -1,0 +1,43 @@
+{
+  // Ranks_CustomCombos — українська.
+  // Ключі combo.<key> відповідають прикладам у resources/examples/combos.jsonc.
+  "command.combos.help": "Показати ваші виконані комбінації.",
+
+  "menu.combos.title": "Комбінації",
+  "menu.combos.empty": "Ви ще не виконали жодної комбінації.",
+  "menu.combos.row": "{0}: {1}",
+  "menu.combos.error": "Статистика комбінацій зараз недоступна.",
+
+  "menu.combos.title_in": "Комбінації — {0}",
+  "menu.combos.current": "Цей сезон",
+  "menu.combos.alltime": "За весь час",
+  "menu.combos.previous": "Попередні сезони",
+  "menu.combos.season": "Сезон від {0}",
+  "menu.combos.month": "{0} {1}",
+  "menu.combos.initial": "До сезонів",
+  "menu.combos.empty_current": "У цьому сезоні ще немає комбінацій.",
+  "menu.combos.empty_season": "У цьому сезоні не було комбінацій.",
+  "menu.combos.empty_initial": "Старі комбінації враховано за весь час.",
+  "menu.combos.seasons_empty": "Попередніх сезонів ще немає.",
+
+  "month.1": "Січень",
+  "month.2": "Лютий",
+  "month.3": "Березень",
+  "month.4": "Квітень",
+  "month.5": "Травень",
+  "month.6": "Червень",
+  "month.7": "Липень",
+  "month.8": "Серпень",
+  "month.9": "Вересень",
+  "month.10": "Жовтень",
+  "month.11": "Листопад",
+  "month.12": "Грудень",
+
+  "combo.noscope_hs": "{lime}Хедшот без прицілу",
+  "combo.wallbang_hs": "{lime}Хедшот крізь стіну",
+  "combo.knife_hs": "{lime}Хедшот ножем",
+  "combo.airborne_sniper": "{lime}Вбивство зі снайперської гвинтівки в повітрі",
+  "combo.blind_nade": "{lime}Вбивство гранатою наосліп",
+  "combo.nade_double": "{lime}Подвійне вбивство гранатою",
+  "combo.long_noscope": "{lime}Далекий постріл без прицілу"
+}

@@ -1,0 +1,59 @@
+{
+  // Ranks_WeaponStats — українська.
+  "error.players_only": "[red]Цю команду може використовувати лише гравець.",
+  "error.unavailable": "[red]Статистика зброї зараз недоступна.",
+
+  "menu.error": "Ця статистика зараз недоступна.",
+  "menu.weapons.title": "Статистика зброї",
+  "menu.weapons.empty": "У вас ще немає статистики зброї.",
+  "menu.weapons.hint": "Оберіть, щоб побачити влучання цієї зброї",
+  "menu.weapons.row": "{0} | {1} вбивств, {2}% HS, {3}% влучн.",
+
+  "menu.hitgroups.title": "Загальна статистика влучань",
+  "menu.hitgroups.empty": "У вас ще немає влучань.",
+  "menu.hitgroups.row": "{0}: {1} влучань ({2}%), {3} шкоди",
+  "menu.weaponhits.title": "{0} — влучання",
+
+  "menu.period.current": "Цей сезон",
+  "menu.period.alltime": "За весь час",
+  "menu.period.previous": "Попередні сезони",
+  "menu.period.title": "Попередні сезони",
+  "menu.period.row": "Сезон від {0}",
+  "menu.period.month": "{0} {1}",
+  "menu.period.initial": "До сезонів",
+  "menu.period.empty": "Попередніх сезонів ще немає.",
+
+  "month.1": "Січень",
+  "month.2": "Лютий",
+  "month.3": "Березень",
+  "month.4": "Квітень",
+  "month.5": "Травень",
+  "month.6": "Червень",
+  "month.7": "Липень",
+  "month.8": "Серпень",
+  "month.9": "Вересень",
+  "month.10": "Жовтень",
+  "month.11": "Листопад",
+  "month.12": "Грудень",
+
+  "menu.weapons.title_period": "Статистика зброї — {0}",
+  "menu.weapons.empty_period": "У цьому сезоні немає статистики зброї.",
+  "menu.hitgroups.title_period": "Влучання — {0}",
+  "menu.hitgroups.empty_period": "У цьому сезоні немає влучань.",
+  "menu.weaponhits.title_period": "{0} — {1}",
+
+  "hitgroup.generic": "Загальне",
+  "hitgroup.head": "Голова",
+  "hitgroup.chest": "Груди",
+  "hitgroup.stomach": "Живіт",
+  "hitgroup.left_arm": "Ліва рука",
+  "hitgroup.right_arm": "Права рука",
+  "hitgroup.left_leg": "Ліва нога",
+  "hitgroup.right_leg": "Права нога",
+  "hitgroup.neck": "Шия",
+  "hitgroup.gear": "Спорядження",
+  "hitgroup.special": "Особливе",
+  "hitgroup.unknown": "Хітбокс {0}",
+
+  "command.weaponstats.help": "Показати вбивства, влучність і частку хедшотів за зброєю."
+}
