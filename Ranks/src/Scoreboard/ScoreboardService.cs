@@ -279,17 +279,24 @@ internal sealed class ScoreboardService : IDisposable
     private static int CompetitiveIcon(RanksConfig config, int skillGroup, int ceiling) =>
         Math.Clamp(skillGroup + config.Scoreboard.SkillGroupOffset, 0, ceiling);
 
-    /// <summary>K4-LevelRanks' mode-0 mapping, reproduced so an existing icon addon ports over.</summary>
+    /// <summary>K4-LevelRanks' mode-0 mapping, with consecutive tiers <c>CustomRankStep</c> icons apart.</summary>
     /// <remarks>
     /// Position-based rather than per-tier because that is what the replacement icon sets in the
     /// wild are indexed against. <paramref name="rankId"/> is 1-based, matching K4's <c>GetRankId</c>.
+    /// <para>
+    /// Max and Margin are ladder positions, which the step scales into icon numbers, so a step of 1
+    /// is K4 exactly. Widened to long because the engine indexes with the result, and a wrapped int
+    /// is a wrong icon.
+    /// </para>
     /// </remarks>
     internal static int CustomIcon(ScoreboardOptions scoreboard, int rankId)
     {
-        var value = rankId > scoreboard.CustomRankMax
-            ? scoreboard.CustomRankBase + scoreboard.CustomRankMax - scoreboard.CustomRankMargin
-            : scoreboard.CustomRankBase + (rankId - scoreboard.CustomRankMargin - 1);
+        var stepsFromBase = rankId > scoreboard.CustomRankMax
+            ? (long)scoreboard.CustomRankMax - scoreboard.CustomRankMargin
+            : (long)rankId - scoreboard.CustomRankMargin - 1;
 
-        return Math.Max(0, value);
+        var value = scoreboard.CustomRankBase + stepsFromBase * scoreboard.CustomRankStep;
+
+        return (int)Math.Clamp(value, 0, int.MaxValue);
     }
 }

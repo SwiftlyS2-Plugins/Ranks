@@ -1156,7 +1156,7 @@ by `ScoreboardService.EngineRankType`. The engine's set is not `0`–`4`:
 | `Premier` *(default)* | `11` | The player's points, rendered as a CS Rating | — |
 | `Competitive` | `12` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 18 |
 | `Wingman` | `7` | Ladder tier's `SkillGroup` + `SkillGroupOffset` | 18 |
-| `Custom` | `12` | Ladder **position** through `Scoreboard.CustomRank*` | `CustomRankMax` |
+| `Custom` | `12` | Ladder **position** through `Scoreboard.CustomRank*`, `CustomRankStep` icons apart | `CustomRankMax` |
 
 > [!WARNING]
 > **Writing the plugin enum straight through is a silent total failure**, and it shipped
@@ -1165,15 +1165,22 @@ by `ScoreboardService.EngineRankType`. The engine's set is not `0`–`4`:
 > Any mode added here needs its engine value confirmed on a live server — these are the
 > values K4-LevelRanks ships and runs in production, not values inferred from the enum.
 
-`Custom` reproduces K4-LevelRanks' mode 0 exactly, so a server already running one of
-its replacement icon addons keeps its `CustomRankBase` / `CustomRankMax` /
-`CustomRankMargin` values unchanged:
+`Custom` maps ladder position onto a replacement icon set, `Scoreboard.CustomRankStep`
+(default `1`) icon numbers apart:
 
 ```
 icon = max(0, position > CustomRankMax
-                ? CustomRankBase + CustomRankMax - CustomRankMargin
-                : CustomRankBase + (position - CustomRankMargin - 1))
+                ? CustomRankBase + (CustomRankMax - CustomRankMargin) * CustomRankStep
+                : CustomRankBase + (position - CustomRankMargin - 1) * CustomRankStep)
 ```
+
+**At `CustomRankStep = 1` this is K4-LevelRanks' mode 0 exactly**, so a server already
+running one of its replacement icon addons keeps its `CustomRankBase` / `CustomRankMax` /
+`CustomRankMargin` values unchanged. A larger step spaces tiers through a set bigger than
+the ladder — `10` puts seven tiers on icons 1, 11, … 61 of a 100-icon set. `CustomRankMax`
+and `CustomRankMargin` stay ladder positions; only the step turns a position into an icon
+number. A step below `1` is reset to `1` with a warning, and a result past `int` range is
+capped rather than wrapped.
 
 It is position-based rather than per-tier because that is what those addons are indexed
 against. The other icon modes stay per-tier, so several tiers may deliberately share an

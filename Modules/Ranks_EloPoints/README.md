@@ -68,7 +68,7 @@ the same number. Core's `!resetrank` and `!resetmyrank` clear the rating as well
 
 ## Configuration
 
-Config file: `addons/swiftlys2/plugins/Ranks_EloPoints/config.jsonc`
+Config file: `addons/swiftlys2/configs/plugins/Ranks_EloPoints/config.jsonc`
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|

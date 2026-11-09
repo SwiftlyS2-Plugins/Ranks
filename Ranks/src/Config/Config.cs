@@ -139,8 +139,8 @@ public enum RankDisplayMode
 
     /// <remarks>
     /// Competitive's icon slots driven by ladder position through <c>Scoreboard.CustomRank*</c>,
-    /// for servers shipping a replacement icon set. Matches K4-LevelRanks' mode 0 exactly so an
-    /// existing icon addon and its base/margin values port over unchanged.
+    /// for servers shipping a replacement icon set. At the default step it matches K4-LevelRanks'
+    /// mode 0 exactly, so an existing icon addon and its base/margin values port over unchanged.
     /// <para>
     /// Was <c>5</c> while <c>4</c> held the removed Danger Zone slot, whose icons stock CS2 does
     /// not ship. A config carrying <c>5</c> is now out of range, so ConfigValidator resets it to
@@ -178,6 +178,9 @@ public sealed class ScoreboardOptions
 
     /// <remarks>Ladder positions skipped before the first icon is used. Custom mode only.</remarks>
     public int CustomRankMargin { get; set; } = 0;
+
+    /// <remarks>Distance between consecutive tiers' icon numbers; 1 is K4-LevelRanks' mode 0. Custom mode only.</remarks>
+    public int CustomRankStep { get; set; } = 1;
 
     public RevealOptions Reveal { get; set; } = new();
 }
