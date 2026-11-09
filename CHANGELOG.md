@@ -22,6 +22,10 @@ Notable changes to Ranks, newest first.
 
 ---
 
+## [1.3.2] - 2026-11-09
+
+- Added Ukrainian translations.
+
 ## [1.3.1] - 2026-11-08
 
 - Added Finnish translations to core and all modules

@@ -14,6 +14,10 @@ Notable changes to Ranks_EloPoints, newest first.
 
      See .github/instructions/changelog.instructions.md for the full style. -->
 
+## [1.1.2] - 2026-11-09
+
+- No changes; released alongside Ranks 1.3.2.
+
 ## [1.1.1] - 2026-11-08
 
 - No changes; released alongside Ranks 1.3.1.
