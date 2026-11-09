@@ -23,6 +23,7 @@ internal static partial class ConfigValidator
         ClampPoints(config.Points, logger);
         ClampVip(config.Vip, logger);
         ClampRankMode(config.Scoreboard, logger);
+        ClampCustomRankStep(config.Scoreboard, logger);
         ClampReveal(config.Scoreboard.Reveal, logger);
     }
 
@@ -49,6 +50,12 @@ internal static partial class ConfigValidator
             (int)scoreboard.RankMode, RankDisplayMode.Premier, string.Join(", ", Enum.GetNames<RankDisplayMode>()));
 
         scoreboard.RankMode = RankDisplayMode.Premier;
+    }
+
+    /// <remarks>Below 1 the tiers stop climbing the icon set: 0 puts them all on one icon, a negative step counts down.</remarks>
+    private static void ClampCustomRankStep(ScoreboardOptions scoreboard, ILogger logger)
+    {
+        scoreboard.CustomRankStep = AtLeast(scoreboard.CustomRankStep, 1, "Scoreboard.CustomRankStep", logger);
     }
 
     /// <remarks>

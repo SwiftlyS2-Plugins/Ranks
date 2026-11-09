@@ -60,7 +60,7 @@ With core's seasons on it opens on the same season choice as the menu rows below
 
 ## Configuration
 
-Config file: `addons/swiftlys2/plugins/Ranks_WeaponStats/config.jsonc`
+Config file: `addons/swiftlys2/configs/plugins/Ranks_WeaponStats/config.jsonc`
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|

@@ -55,7 +55,7 @@ Name, aliases and permission are editable in `commands.jsonc`. An empty `Command
 
 ## Configuration
 
-Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
+Config file: `addons/swiftlys2/configs/plugins/Ranks_Prestige/config.jsonc`
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -124,7 +124,7 @@ Config file: `addons/swiftlys2/plugins/Ranks_Prestige/config.jsonc`
 
 An empty `RankMode` keeps core's configured mode, so level 1 above stays on whatever
 `Scoreboard.RankMode` is set to. `Custom` additionally reads core's
-`Scoreboard.CustomRankBase` / `CustomRankMax` / `CustomRankMargin`.
+`Scoreboard.CustomRankBase` / `CustomRankMax` / `CustomRankMargin` / `CustomRankStep`.
 
 </details>
 

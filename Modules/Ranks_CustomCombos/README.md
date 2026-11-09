@@ -109,7 +109,7 @@ quietly never matching.
 
 ## Configuration
 
-Config file: `addons/swiftlys2/plugins/Ranks_CustomCombos/config.jsonc`
+Config file: `addons/swiftlys2/configs/plugins/Ranks_CustomCombos/config.jsonc`
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|

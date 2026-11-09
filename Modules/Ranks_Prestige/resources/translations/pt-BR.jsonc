@@ -1,0 +1,17 @@
+{
+  // Shown by !prestige. Plain text — core's chat colours are applied by the framework.
+  "command.prestige.help": "Exibe seu nível de prestígio e seu progresso",
+
+  "error.players_only": "Este comando só pode ser utilizado dentro do jogo.",
+  "error.unavailable": "Os dados de prestígio ainda não estão disponíveis. Tente novamente em instantes.",
+
+  "prestige.disabled": "O sistema de prestígio está desativado neste servidor.",
+  // {0} is the level the player's CURRENT points reach. Points can fall, so this can fall too.
+  "prestige.level": "Maior nível alcançado: {0}",
+  // {0} stored points, {1} the next level's threshold — both absolute, not per-level.
+  "prestige.next": "Próximo nível: {0}/{1}",
+  "prestige.max": "Você alcançou o nível máximo de prestígio.",
+
+  // Doubles as the label core shows under its Statistics menu, so renaming it renames that row.
+  "menu.prestige.title": "Prestígio"
+}

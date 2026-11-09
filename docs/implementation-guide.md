@@ -409,6 +409,7 @@ effect — but a renamed command needs the restart.
 | `Rank.MinPoints` | `>= 0` | clamp + warn (FR-PTS-05's formula assumes non-negative) |
 | `Database.MaintenanceIntervalHours` | `>= 0` | clamp to `0` + warn (`0` = load-only) |
 | `Database.VirtualPurgeMode` | `0` (Days) or `1` (Monthly) | reset to `0` + warn — `VirtualPurgeDays` stays in charge. An unknown *name* fails the bind itself, before validation |
+| `Scoreboard.CustomRankStep` | `>= 1` | clamp to `1` + warn — `1` is K4-LevelRanks' mode 0 (FR-SCB-03) |
 
 Throw for identifiers, clamp for numbers: a bad multiplier is a bad game, a bad
 identifier is a SQL injection surface.

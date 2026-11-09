@@ -114,7 +114,7 @@ internal static class LadderSeed
             // the progress bar. Switching to Competitive without also switching to a finer-grained
             // ladder removes the number and leaves seven icons; resources/examples ships an 18-entry
             // ladder for that case. Custom mode ignores SkillGroup and maps ladder POSITION onto a
-            // replacement icon set through Scoreboard.CustomRankBase/Max/Margin instead.
+            // replacement icon set through Scoreboard.CustomRankBase/Max/Margin/Step instead.
             {
               "Ladder": {
                 "Tiers": [

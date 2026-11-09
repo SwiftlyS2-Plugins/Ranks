@@ -24,41 +24,41 @@
 
 ## ✨ Features
 
-All of them included in the Ranks plugin. There are also [Modules](#-modules) which add even more features.
+All included in Ranks. [Modules](#-modules) add more.
 
-- 🏆 **Points and ranks** — a configurable ladder, priced per event, with VIP and dynamic multipliers
-- 📊 **Gameplay stats** — kills, deaths, assists, round and match results, bomb plants and defuses
-- ⏱️ **Playtime** — time on the server as K4-LevelRanks counted it, with `!mytime` and a playtime leaderboard, `!ttop`
-- 🗓️ **Seasons** — optional: every calendar month or every N days everyone's rank starts over, while past seasons and all-time standings stay browsable
-- 🎖️ **Native scoreboard ranks** — Premier, Competitive, Wingman, or your own icon set, plus rank clan tags
-- 👀 **Everyone's rank, not just yours** — the reveal CS2 sends once per map, re-sent on round start, on join and on rank change
+- 🏆 **Points and ranks** — points per event, a rank ladder, killstreaks, VIP and dynamic multipliers
+- 📊 **Gameplay stats** — kills, deaths, assists, headshots, accuracy, rounds, matches, bombs
+- ⏱️ **Playtime** — `!mytime` and the `!ttop` leaderboard
+- 🗓️ **Seasons** — optional monthly or every-N-days rank reset; past seasons stay browsable
+- 🎖️ **Scoreboard ranks** — Premier, Competitive, Wingman or your own icons, plus clan tags
+- 👀 **Everyone's rank visible** — all players see each other's rank icons
 - 🗄️ **MySQL, MariaDB, PostgreSQL or SQLite** — one connection, shared with every module
-- 🧩 **Module API** — other plugins read ranks, react to changes, and own tables core migrates for them
-- 🔁 **Live config reload** — points, ladder and scoreboard apply on save; only command names and table affixes need a restart
-- 🏷️ **Multi-server friendly** — table prefixes and suffixes let several servers share one database
+- 🧩 **Module API** — other plugins read ranks, award points and add menu rows
+- 🔁 **Live config reload** — most settings apply on save
+- 🏷️ **Multi-server** — share one database, or keep a ladder per server
 
 ## 🚀 Getting Started
 
 | Guide | Description |
 |-------|-------------|
-| **[Features](../../wiki/Features)** | The full list, and what core deliberately does not do |
-| **[Installation](../../wiki/Installation)** | Install, pick a database, verify |
+| **[Features](../../wiki/Features)** | Everything Ranks does |
+| **[Installation](../../wiki/Installation)** | Install and verify |
 | **[Commands](../../wiki/Commands)** | Player and admin commands |
-| **[Menus](../../wiki/Menus)** | The one menu tree, and what each category holds |
+| **[Menus](../../wiki/Menus)** | The `!rank` menu |
 | **[Configuration](../../wiki/Configuration)** | Every setting, with defaults |
 
 ## ⚙️ Tuning Rank Progression
 
 | Topic | Description |
 |-------|-------------|
-| **[Points and Events](../../wiki/Points-And-Events)** | Price every action, and the gates that suppress them |
-| **[Rank Ladder](../../wiki/Rank-Ladder)** | Turn points into named tiers |
-| **[Scoreboard and Rank Icons](../../wiki/Scoreboard-And-Rank-Icons)** | Five modes, plus your own icon set |
-| **[Database](../../wiki/Database)** | Shared ladders, seasons, purging, persistence |
+| **[Points and Events](../../wiki/Points-And-Events)** | Points per event and killstreak |
+| **[Rank Ladder](../../wiki/Rank-Ladder)** | The ranks and their thresholds |
+| **[Scoreboard and Rank Icons](../../wiki/Scoreboard-And-Rank-Icons)** | Icon modes and custom icon sets |
+| **[Database](../../wiki/Database)** | Tables, multi-server, seasons, purging |
 
 ## 🧩 Modules
 
-Official modules. **[Modules Overview](../../wiki/Modules)** explains what a module is, the four kinds, and which can conflict.
+Official modules. **[Modules Overview](../../wiki/Modules)** covers installing them and which ones can run together.
 
 | Module | Kind | What it adds |
 |--------|------|--------------|
