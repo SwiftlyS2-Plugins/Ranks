@@ -248,15 +248,9 @@ tick can still be too early.
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- No direct Microsoft.Extensions.* references: SwiftlyS2.CS2 brings them at the version SwiftlyS2
+         itself builds against, and pinning them here fails restore (NU1605) whenever the SDK raises them. -->
     <PackageReference Include="SwiftlyS2.CS2" Version="1.4.13"
-                      ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0"
-                      ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0"
-                      ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0"
-                      ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0"
                       ExcludeAssets="runtime" PrivateAssets="all" />
 
     <!-- Migrations ship with the plugin; the host does not provide them. -->
@@ -269,9 +263,11 @@ tick can still be too early.
 </Project>
 ```
 
-> `SwiftlyS2.CS2` and every `Microsoft.Extensions.*` package must carry
-> `ExcludeAssets="runtime" PrivateAssets="all"` — the host already provides them,
-> and shipping a second copy produces duplicate type identities. The
+> `SwiftlyS2.CS2` must carry `ExcludeAssets="runtime" PrivateAssets="all"` — the
+> host already provides it, and shipping a second copy produces duplicate type
+> identities. `Microsoft.Extensions.*` is never referenced directly: `SwiftlyS2.CS2`
+> brings it in, the exclusion carries over to it, and a pinned version fails
+> restore with `NU1605` whenever SwiftlyS2 raises its own. The
 > FluentMigrator packages are the opposite case: nothing provides them, so they
 > must ship normally — beside the DLL, never in `resources/exports`, and without
 > `PrivateAssets` (which silently drops them from publish). Modules ship their own

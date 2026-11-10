@@ -13,12 +13,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- "10.*" tracks SwiftlyS2's floor: it floats its own Microsoft.Extensions minimum, and a fixed version here becomes a downgrade error on the next beta. -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <!-- No direct Microsoft.Extensions.* references: SwiftlyS2.CS2 brings them at the version SwiftlyS2
+         itself builds against, and pinning them here fails restore (NU1605) whenever the SDK raises them. -->
     <!-- "*-*" = newest version including prereleases. Core.Menu (FR-CMD-06) ships only in the 1.5.0 betas. -->
     <PackageReference Include="SwiftlyS2.CS2" Version="*-*" ExcludeAssets="runtime" PrivateAssets="all" />
 

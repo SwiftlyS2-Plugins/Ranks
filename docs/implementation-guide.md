@@ -70,13 +70,11 @@ mean shipping against an API marked for removal.
 > — and to pin to the first stable 1.5.x once it exists.
 
 > [!WARNING]
-> **The `Microsoft.Extensions.*` references must float too — `10.*`.**
-> SwiftlyS2 raises its own minimum between betas, and a fixed version here
+> **There are no direct `Microsoft.Extensions.*` references — `SwiftlyS2.CS2` brings them in.**
+> SwiftlyS2 raises its own minimum between betas, and any version pinned here
 > becomes `NU1605: Detected package downgrade` on the next bump: a build
 > failure, not a warning. Observed immediately — `1.5.1-beta.12` requires
-> `10.0.13` against the scaffold's `10.0.0`. Float within the major rather than
-> with a bare `*`, so a future .NET 11 package cannot be pulled into a
-> `net10.0` plugin.
+> `10.0.13` against the scaffold's `10.0.0`.
 
 > [!WARNING]
 > **Appendix A was reflected from 1.4.13 and has not been re-run.**
