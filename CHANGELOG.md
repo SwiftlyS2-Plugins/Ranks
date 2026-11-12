@@ -27,6 +27,7 @@ Notable changes to Ranks, newest first.
 - New `Scoreboard.CustomRankStep` spaces Custom-mode tiers through a larger icon set: `10`
   puts them on icons 1, 11, 21 and so on. The default, `1`, counts up one icon per tier
   ([wiki](https://github.com/SwiftlyS2-Plugins/Ranks/wiki/Scoreboard-And-Rank-Icons#custom-mode)).
+- Added more translations
 
 ## [1.3.1] - 2026-11-08
 

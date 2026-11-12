@@ -157,8 +157,8 @@ a list of events to keep current. Everything accrued before the restart is
 discarded.
 
 `ActualRoundsPlayed` is also better than summing the two scores, which is what
-the `ServerReporter` plugin in the Rampage repository does for its own purposes:
-a drawn round increments rounds played but neither score.
+one server-reporting plugin does for its own purposes: a drawn round increments
+rounds played but neither score.
 
 Match end is `EventCsWinPanelMatch`, with `Phase == GAMEPHASE_MATCH_ENDED` as a
 second route to the same event. The backstop is not redundancy for its own sake

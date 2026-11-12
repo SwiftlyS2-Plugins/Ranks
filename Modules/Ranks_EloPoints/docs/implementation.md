@@ -479,10 +479,9 @@ private bool TryReadMatch(out MatchSnapshot snapshot)
 ```
 
 **The broad catch is not defensive padding — it is a production finding** from
-`rampage-plugins-ServerReporter`, which reads the same struct on a heartbeat and
-carries the identical comment. It matters more here than there: this module
-reads at round end and map unload, which is precisely when the rules entity is
-being torn down.
+a server-reporting plugin that reads the same struct on a heartbeat. It matters
+more here than there: this module reads at round end and map unload, which is
+precisely when the rules entity is being torn down.
 
 A failed read at a round boundary skips that round's accrual rather than
 guessing. A failed read at settle time falls back to the session's own round
