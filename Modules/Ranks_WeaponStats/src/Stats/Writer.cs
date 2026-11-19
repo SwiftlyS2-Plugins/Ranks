@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
 using HitGroupRow = (short HitGroup, long Hits, long Damage);
@@ -23,8 +24,16 @@ internal sealed class Writer
     private readonly ILogger _logger;
     private readonly Lock _queueGate = new();
 
+    /// <summary>Changes a failed transaction left behind, applied again in queue order ahead of the next ones.</summary>
     /// <remarks>Touched only by queued operations, which never overlap, so it needs no lock of its own.</remarks>
-    private readonly List<StatsDelta> _retry = [];
+    private readonly List<Change> _retry = [];
+
+    /// <summary>How many failures of its own statements drop a reset or purge from the retry buffer.</summary>
+    /// <remarks>
+    /// Unbounded, one the database always refuses — no DELETE permission, a period table never created — holds every
+    /// later write back for the rest of the load. Only its own statements count, unless the driver marks the failure transient.
+    /// </remarks>
+    private const int ClearAttempts = 3;
 
     private Task _queue = Task.CompletedTask;
 
@@ -71,7 +80,7 @@ internal sealed class Writer
     {
         if (!IsReady || batch.Count == 0) return Task.CompletedTask;
 
-        return Enqueue(() => WritePending(batch));
+        return Enqueue(() => Commit(batch.ConvertAll<Change>(delta => new Change.Add(delta))));
     }
 
     /// <summary>Clears what a core reset cleared: one period's rows, or all time while periods are off.</summary>
@@ -100,7 +109,7 @@ internal sealed class Writer
 
         var ids = steamIds.ToArray();
 
-        return Enqueue(() => Purge(ids));
+        return Enqueue(() => Commit([new Change.Purge(ids)]));
     }
 
     /// <summary>Deletes rows, all time and per period, for players core no longer knows about.</summary>
@@ -175,43 +184,119 @@ internal sealed class Writer
             return _queue = _queue.ContinueWith(_ => operation(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
-    /// <summary>Writes the batch together with whatever earlier writes left in the retry buffer.</summary>
+    /// <summary>Applies whatever a failed transaction left behind, then <paramref name="changes"/>, in queue order and in one transaction.</summary>
     /// <remarks>
-    /// A failed batch goes back into the retry buffer, off-thread, rather than into the live session
-    /// objects, which belong to the game thread. Logged ungated: it is the data-loss path.
+    /// Never reordered: a reset or purge that failed stays ahead of every delta cut after it, so those land on the cleared
+    /// rows instead of being cleared with them, until <see cref="GiveUpOn"/> drops it. A failure keeps everything here,
+    /// off-thread, never in the live sessions, which belong to the game thread. Logged ungated: the data-loss path.
     /// </remarks>
-    private void WritePending(List<StatsDelta> batch)
+    private void Commit(IEnumerable<Change> changes)
     {
-        _retry.AddRange(batch);
-        List<StatsDelta> pending = [.. _retry];
-        _retry.Clear();
+        _retry.AddRange(changes);
+
+        if (_retry.Count == 0) return;
+
+        Change? applying = null;
 
         try
         {
-            Write(pending);
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+
+            foreach (var change in _retry)
+            {
+                applying = change;
+                Apply(connection, transaction, change);
+            }
+
+            applying = null;
+            transaction.Commit();
+            _retry.Clear();
         }
         catch (Exception ex)
         {
-            _retry.AddRange(pending);
-            _logger.LogError(ex, "Ranks_WeaponStats: flush of {Count} player batch(es) failed; they are buffered for retry.", pending.Count);
+            if (applying is { } failed && GiveUpOn(failed, ex)) Commit([]);
+            else _logger.LogError(ex, "Ranks_WeaponStats: writing {Count} change(s) failed; they are buffered for retry.", _retry.Count);
         }
     }
 
-    private void Write(List<StatsDelta> batch)
+    /// <summary>
+    /// Counts a failure of a reset's or purge's own statements that the driver does not mark transient, and drops the
+    /// change at <see cref="ClearAttempts"/> of them.
+    /// </summary>
+    /// <returns>True when it was dropped, so the changes queued behind it are written at once.</returns>
+    /// <remarks>A delta is never given up on: it is kept until it is written.</remarks>
+    private bool GiveUpOn(Change failed, Exception error)
     {
-        using var connection = _core.Database.GetConnection(_connectionName);
-        connection.Open();
-        using var transaction = connection.BeginTransaction();
+        if (failed is Change.Add || IsTransient(error) || ++failed.Failures < ClearAttempts) return false;
 
-        foreach (var delta in batch)
+        _retry.RemoveAll(change => ReferenceEquals(change, failed));
+        ReportDropped(failed, error);
+
+        return true;
+    }
+
+    /// <summary>Whether the driver marks <paramref name="error"/>, or an exception it wraps, as transient: worth retrying unchanged.</summary>
+    /// <remarks>
+    /// Npgsql marks lost connections, deadlocks, and lock and command timeouts; MySqlConnector deadlocks and InnoDB
+    /// lock-wait timeouts but no lost connection or command timeout; System.Data.SQLite nothing, so every failure counts.
+    /// </remarks>
+    private static bool IsTransient(Exception? error) =>
+        error is not null && (error is DbException { IsTransient: true } || IsTransient(error.InnerException));
+
+    /// <remarks>Ungated: what the change would have cleared now stays.</remarks>
+    private void ReportDropped(Change dropped, Exception error)
+    {
+        switch (dropped)
         {
-            WriteDelta(connection, transaction, delta, period: null);
+            case Change.Reset reset:
+                _logger.LogError(
+                    error,
+                    "Ranks_WeaponStats: gave up resetting the weapon statistics of {SteamId} after {Attempts} failed " +
+                    "attempts; they stay as they were.",
+                    reset.SteamId, dropped.Failures);
+                break;
 
-            if (delta.Period is { } period)
-                WriteDelta(connection, transaction, delta, period);
+            case Change.Purge purge:
+                _logger.LogError(
+                    error,
+                    "Ranks_WeaponStats: gave up deleting the weapon statistics of {Count} purged player(s) after " +
+                    "{Attempts} failed attempts; their rows stay.",
+                    purge.SteamIds.Length, dropped.Failures);
+                break;
         }
+    }
 
-        transaction.Commit();
+    private void Apply(IDbConnection connection, IDbTransaction transaction, Change change)
+    {
+        switch (change)
+        {
+            case Change.Add add:
+                AddDelta(connection, transaction, add.Delta);
+                break;
+
+            case Change.Reset { Period: { } wiped } reset:
+                ClearPeriod(connection, transaction, reset.SteamId, wiped);
+                break;
+
+            case Change.Reset reset:
+                ClearAllTime(connection, transaction, reset.SteamId);
+                break;
+
+            case Change.Purge purge:
+                Purge(connection, transaction, purge.SteamIds);
+                break;
+        }
+    }
+
+    /// <summary>Adds one delta onto the all-time rows and, when it carries a period, onto that period's rows too.</summary>
+    private void AddDelta(IDbConnection connection, IDbTransaction transaction, StatsDelta delta)
+    {
+        WriteDelta(connection, transaction, delta, period: null);
+
+        if (delta.Period is { } period)
+            WriteDelta(connection, transaction, delta, period);
     }
 
     /// <summary>Adds one delta onto the all-time rows, or onto one period's rows when <paramref name="period"/> is set.</summary>
@@ -334,30 +419,18 @@ internal sealed class Writer
     }
 
     /// <remarks>
-    /// Drops the player's retry entries for what is wiped before touching the database: all of them
-    /// while periods are off, the wiped period's while they are on. A closed period's entries stay,
-    /// because core keeps past periods through a reset. Not retried on failure — a later attempt
-    /// would also take away whatever the player has earned since.
+    /// Drops the player's retry entries for what is wiped before queuing the clear itself: all of them while periods
+    /// are off, the wiped period's while they are on. Every one of them was cut before the reset; a closed period's
+    /// entries stay, because core keeps past periods through a reset. A clear that fails stays in the buffer ahead of
+    /// every delta cut after it, so a retry takes away only what the player held before the reset, never what they
+    /// earned since.
     /// </remarks>
     private void Reset(ulong steamId, long? period)
     {
-        _retry.RemoveAll(delta => delta.SteamId == steamId && (period is null || delta.Period == period));
+        _retry.RemoveAll(change =>
+            change is Change.Add { Delta: var delta } && delta.SteamId == steamId && (period is null || delta.Period == period));
 
-        try
-        {
-            using var connection = _core.Database.GetConnection(_connectionName);
-            connection.Open();
-            using var transaction = connection.BeginTransaction();
-
-            if (period is { } wiped) ClearPeriod(connection, transaction, steamId, wiped);
-            else ClearAllTime(connection, transaction, steamId);
-
-            transaction.Commit();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Ranks_WeaponStats: could not reset the weapon statistics of {SteamId}; they are unchanged.", steamId);
-        }
+        Commit([new Change.Reset(steamId, period)]);
     }
 
     /// <summary>Deletes every all-time row the player holds: a reset while periods are off, when all time is all there is.</summary>
@@ -470,24 +543,12 @@ internal sealed class Writer
             Execute(connection, transaction, statement, steamId, period: null);
     }
 
-    private void Purge(ulong[] ids)
+    /// <summary>Deletes every row of the purged players from all six tables.</summary>
+    private void Purge(IDbConnection connection, IDbTransaction transaction, ulong[] ids)
     {
-        try
-        {
-            using var connection = _core.Database.GetConnection(_connectionName);
-            connection.Open();
-            using var transaction = connection.BeginTransaction();
-
-            foreach (var table in EveryTable())
-                foreach (var steamId in ids)
-                    Execute(connection, transaction, $"DELETE FROM {table} WHERE steam_id = @steam_id", steamId, period: null);
-
-            transaction.Commit();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Ranks_WeaponStats: failed to sweep {Count} purged player(s).", ids.Length);
-        }
+        foreach (var table in EveryTable())
+            foreach (var steamId in ids)
+                Execute(connection, transaction, $"DELETE FROM {table} WHERE steam_id = @steam_id", steamId, period: null);
     }
 
     private void ReconcileOrphans(string playersTable)
@@ -609,5 +670,22 @@ internal sealed class Writer
         parameter.ParameterName = name;
         parameter.Value = value;
         command.Parameters.Add(parameter);
+    }
+
+    /// <summary>One queued change to this module's rows: a delta, a core reset, or a purge.</summary>
+    /// <remarks>The retry buffer holds these in queue order, so a failed reset or purge is retried where it was queued.</remarks>
+    private abstract record Change
+    {
+        /// <summary>How many times this change's own statements have failed, transient failures aside; counted for a reset or a purge only.</summary>
+        public int Failures { get; set; }
+
+        /// <summary>A delta added onto all time, and onto its period when it carries one.</summary>
+        public sealed record Add(StatsDelta Delta) : Change;
+
+        /// <summary>A core reset: one period cleared and taken off all time, or all time while periods are off.</summary>
+        public sealed record Reset(ulong SteamId, long? Period) : Change;
+
+        /// <summary>Purged players, deleted from all six tables.</summary>
+        public sealed record Purge(ulong[] SteamIds) : Change;
     }
 }

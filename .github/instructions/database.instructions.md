@@ -135,8 +135,23 @@ convention, so while a module owned its own runner every affix helper core could
 offer was opt-in — a convention, not a guarantee. It also fixes a timing
 contradiction: a module's `Load()` runs before the handshake, so it never had an
 `IRanksApi` to ask for a name at the moment it needed one. Core migrates its own
-schema in `Load()` and registered module assemblies in `OnAllPluginsLoaded()`,
-each inside its own try/catch so one bad module cannot take the schema down.
+schema in `Load()` and registered module assemblies in `OnAllPluginsLoaded()` —
+and, since SwiftlyS2 raises that only at server start, any module registering
+after it, or under a core loaded into a running server, in the background as it
+registers, one module at a time — each inside its own try/catch so one bad module
+cannot take the schema down. Core's own migration stays on the loading thread:
+core cannot serve until it knows its schema is usable. Until a module's background
+run finishes, a write to a table it creates fails; every module writer therefore
+keeps what failed — reset and purge included — in a retry buffer, in queue order,
+and replays it ahead of its next write. A reset or purge is dropped, with an
+`Error`, only once its own statements have failed three times for a reason the
+driver does not mark transient, so one the database always refuses cannot hold
+every later write back. Connection failures, deadlocks, lock waits and timeouts
+the driver marks transient (`DbException.IsTransient`, on the exception or any
+it wraps) never cost one, and neither does anything thrown outside the change's
+own statements. Unloading core drops the runs not yet started and
+waits, bounded, for the one running: the next load of core lives in a load
+context of its own and would migrate that module again alongside it.
 
 Core never scans the module assembly it was handed. A module ships its own
 FluentMigrator — SwiftlyS2's load-time `GetTypes()` resolves its `Migration`

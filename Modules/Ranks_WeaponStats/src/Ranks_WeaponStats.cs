@@ -15,7 +15,7 @@ namespace Ranks.WeaponStats;
 
 [PluginMetadata(
     Id = "Ranks_WeaponStats",
-    Version = "1.1.3",
+    Version = "1.1.4",
     Name = "Ranks WeaponStats",
     Author = "Shmitzas",
     Description = "Per-weapon and per-hitgroup statistics for the Ranks plugin.")]
@@ -34,7 +34,8 @@ public sealed class RanksWeaponStats : BasePlugin
 
     private CancellationTokenSource? _flushTimer;
     private bool _reconciled;
-    private bool _hotReload;
+    private bool _loadedIntoRunningServer;
+
     private bool _contractLoadFailed;
     private bool _playGateUnsupported;
     private volatile bool _periodsUnsupported;
@@ -45,7 +46,7 @@ public sealed class RanksWeaponStats : BasePlugin
 
     public override void Load(bool hotReload)
     {
-        _hotReload = hotReload;
+        _loadedIntoRunningServer = LoadsIntoRunningServer(hotReload);
         _logger = Core.LoggerFactory.CreateLogger("Ranks_WeaponStats");
 
         LoadConfiguration();
@@ -62,6 +63,8 @@ public sealed class RanksWeaponStats : BasePlugin
         _bridge.CoreReady += OnRanksReady;
         _bridge.PeriodClosed += OnPeriodClosed;
         _bridge.PlayerReset += OnPlayerReset;
+        _bridge.PlayerLoaded += OnRanksPlayerLoaded;
+        _bridge.MaintenanceDue += ReconcileOrphansOnce;
 
         // Exactly once. Registering twice double-counts every shot.
         Core.Registrator.Register(_collector);
@@ -73,7 +76,7 @@ public sealed class RanksWeaponStats : BasePlugin
         _commands.RegisterAll(_commandsConfig);
         StartFlushTimer();
 
-        if (hotReload) AdoptConnectedPlayers();
+        if (_loadedIntoRunningServer) OnGameThread(AdoptConnectedPlayers);
     }
 
     /// <remarks>
@@ -114,8 +117,8 @@ public sealed class RanksWeaponStats : BasePlugin
 
     /// <remarks>
     /// Absence is reported from here, not from the binder: the binder runs on every rebuild and
-    /// would spam, while this runs once per load cycle and is the only point where field state is
-    /// authoritative.
+    /// would spam, while this runs once, at server start, and is the only point where field state is
+    /// authoritative. A hot load or reload never reaches it.
     /// </remarks>
     public override void OnAllPluginsLoaded()
     {
@@ -229,6 +232,18 @@ public sealed class RanksWeaponStats : BasePlugin
         if (Core.PlayerManager.GetPlayer(e.PlayerId) is { } player) _collector.Adopt(player);
     }
 
+    /// <summary>Starts recording a player whose SteamID was not known yet when they were put in server.</summary>
+    /// <remarks>
+    /// Core raises it on the game thread once their record has loaded, which under SwiftlyS2's strict Steam
+    /// authorization is the first moment their SteamID reads anything but 0. What they did before that goes
+    /// unrecorded, as it does in core.
+    /// </remarks>
+    private void OnRanksPlayerLoaded(ulong steamId)
+    {
+        if (Core.PlayerManager.GetPlayerFromSteamId(steamId, allowUnauthorized: false) is { IsFakeClient: false } player)
+            _collector.AdoptUntracked(player);
+    }
+
     /// <remarks>The collector detaches the final delta before clearing the slot, in that order.</remarks>
     private void OnDisconnected(IOnClientDisconnectedEvent e)
     {
@@ -269,18 +284,50 @@ public sealed class RanksWeaponStats : BasePlugin
         _ = _writer.ResetAsync(steamId, period);
     }
 
+    /// <summary>Starts recording everyone already connected, for a load into a running server. Game thread only.</summary>
+    /// <remarks>
+    /// SwiftlyS2's file watcher runs Load on a pool thread, where a player leaving mid-loop throws out of Load and every
+    /// slot races the game thread's handlers. A session put-in-server or <c>PlayerDataLoaded</c> opened since Load is kept.
+    /// </remarks>
     private void AdoptConnectedPlayers()
     {
         foreach (var player in Core.PlayerManager.GetAllPlayers())
             if (!player.IsFakeClient)
-                _collector.Adopt(player);
+                _collector.AdoptUntracked(player);
+    }
+
+    /// <summary>Runs <paramref name="work"/> now when on the game thread, else on its next tick.</summary>
+    private void OnGameThread(Action work)
+    {
+        if (Core.IsGameThread) work();
+        else Core.Scheduler.NextTick(work);
+    }
+
+    /// <summary>Whether this load lands on a server already running, which <paramref name="hotReload"/> alone does not say.</summary>
+    /// <remarks>
+    /// SwiftlyS2's plugin API — <c>IPluginManager.LoadPlugin</c> and <c>ReloadPlugin</c> — passes it false on a running
+    /// server. Plugins load at server start before the first map, so a map being up is what tells the two apart.
+    /// </remarks>
+    private bool LoadsIntoRunningServer(bool hotReload) => hotReload || MapIsLoaded();
+
+    /// <summary>Whether the engine has a map up; false when that cannot be read.</summary>
+    /// <remarks><c>GlobalVars</c> throws until the first map, and unguarded in Load that throw aborts the load.</remarks>
+    private bool MapIsLoaded()
+    {
+        try
+        {
+            return Core.Engine.GlobalVars.MaxClients > 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private void OnRanksReady()
     {
         RefreshBotPolicy();
         WarnOnFfaMismatch();
-        ReconcileOrphansOnce();
     }
 
     /// <remarks>
@@ -354,7 +401,7 @@ public sealed class RanksWeaponStats : BasePlugin
         _bridge.IsAvailable && !_periodsUnsupported ? _bridge.GetPeriodsAsync() : Task.FromResult<IReadOnlyList<long>>([]);
 
     /// <remarks>
-    /// Ungated by DetailedLogging: it fires once, and it is the only signal between a
+    /// Ungated by DetailedLogging: it fires once per load of Ranks, and it is the only signal between a
     /// misconfigured server and a module that looks broken. It warns rather than auto-correcting —
     /// an operator may run FFA and still not want friendly fire counted, and silently overriding
     /// their config would be the worse surprise. There is no warning for the reverse: counting
@@ -370,14 +417,17 @@ public sealed class RanksWeaponStats : BasePlugin
             "Set Tracking.CountFriendlyFire to true.");
     }
 
+    /// <summary>Deletes rows of players core no longer keeps, once per load of this module, in core's maintenance window.</summary>
     /// <remarks>
-    /// Cold start only, matching the rule that heavy work runs when no player can feel it. Skipped
-    /// on hot reload, and skipped when core could not resolve its table — deleting against a
-    /// half-broken schema is worse than leaving orphans.
+    /// Run from <c>MaintenanceDue</c>, which core raises after the pass a server start forces and otherwise only on an
+    /// empty server, so the sweep never runs where players can feel it (FR-DB-09). A module that binds to Ranks only on
+    /// a running server waits for that window — at the default <c>Database.MaintenanceIntervalHours</c> of 0, the next
+    /// start. Queued on the writer, so the handler returns at once. Skipped when core could not resolve its table —
+    /// deleting against a half-broken schema is worse than leaving orphans.
     /// </remarks>
     private void ReconcileOrphansOnce()
     {
-        if (_reconciled || _hotReload) return;
+        if (_reconciled) return;
 
         _reconciled = true;
 

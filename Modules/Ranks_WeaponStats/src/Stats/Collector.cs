@@ -62,17 +62,29 @@ internal sealed class Collector
 
     public void UpdateConfig(WeaponStatsConfig config) => _config = config;
 
-    /// <summary>Starts tracking a player. Bots deliberately never get a session.</summary>
+    /// <summary>Starts tracking a player. Bots deliberately never get a session, and neither does a SteamID of 0.</summary>
     /// <remarks>
     /// A bot therefore never owns a row: its slot stays null and every handler returns on the null
     /// check it already has. Whether a bot counts as the <em>counterparty</em> is a separate
-    /// question, answered by core's <c>Rank.BotsEnabled</c>.
+    /// question, answered by core's <c>Rank.BotsEnabled</c>. Under SwiftlyS2's strict Steam authorization a player
+    /// reads SteamID 0 until Steam confirms them, and a session opened then files their play under 0;
+    /// <see cref="AdoptUntracked"/> opens it once core has loaded them.
     /// </remarks>
     public void Adopt(IPlayer player)
     {
-        if (player.IsFakeClient || (uint)player.Slot >= MaxSlots) return;
+        if (player.IsFakeClient || player.SteamID == 0 || (uint)player.Slot >= MaxSlots) return;
 
         _slots[player.Slot] = new SessionStats { SteamId = player.SteamID };
+    }
+
+    /// <summary>Starts tracking a player unless their slot already has a session. Game thread only.</summary>
+    /// <remarks>
+    /// Core repeats <c>PlayerDataLoaded</c> on a reconnect and for everyone after a core reload, and put-in-server may
+    /// open one before a load into a running server adopts everyone. A replaced session would lose the deltas it has not flushed.
+    /// </remarks>
+    public void AdoptUntracked(IPlayer player)
+    {
+        if ((uint)player.Slot < MaxSlots && _slots[player.Slot] is null) Adopt(player);
     }
 
     /// <summary>Stops tracking a slot and returns its final deltas, stamped with the current period.</summary>

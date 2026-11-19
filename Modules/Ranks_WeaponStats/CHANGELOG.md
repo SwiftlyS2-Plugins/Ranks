@@ -14,6 +14,22 @@ Notable changes to Ranks_WeaponStats, newest first.
 
      See .github/instructions/changelog.instructions.md for the full style. -->
 
+## [1.1.4] - 2026-11-18
+
+- Reloading Ranks on a running server no longer removes the **Weapon stats** and
+  **Overall Hit Stats** menu rows or stops resets and new seasons from reaching weapon
+  stats.
+- Reloading the module from another plugin no longer stops recording the players already
+  connected until they reconnect, or runs the startup cleanup mid-game.
+- With SwiftlyS2's strict Steam authorization, a player Steam confirms after they join no
+  longer has their stats recorded under SteamID `0`.
+- Rows already recorded under SteamID `0` are removed at the next server start.
+- A reset or purge that fails, for example during an outage, is retried with the next
+  save instead of being lost, unless the database refuses it three times.
+- Loading Ranks on a running server after this module no longer runs the cleanup of
+  purged players' rows mid-game.
+- A player leaving while the module is being reloaded no longer makes the reload fail.
+
 ## [1.1.3] - 2026-11-09
 
 - Added Ukrainian translations.

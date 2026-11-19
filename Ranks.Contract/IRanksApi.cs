@@ -33,10 +33,22 @@ public interface IRanksApi
     int GetPoints(ulong steamId);
     int GetPoints(IPlayer player);
 
+    /// <summary>Sets the player's total outright, never below <c>Rank.MinPoints</c>.</summary>
+    /// <remarks>
+    /// Applies at once on the game thread. Called from another thread it applies on the next game tick — an
+    /// <c>IPlayer</c> overload only while that player still holds their slot — so a read straight after the call
+    /// still sees the old total, and <c>PointsChanged</c> and <c>RankChanged</c> follow on the game thread.
+    /// </remarks>
     void SetPoints(ulong steamId, int points, string reason);
+
+    /// <inheritdoc cref="SetPoints(ulong, int, string)"/>
     void SetPoints(IPlayer player, int points, string reason);
 
+    /// <summary>Adds <paramref name="amount"/> as given — no gate, multiplier or scaling — floored at <c>Rank.MinPoints</c>.</summary>
+    /// <remarks>Threading as <see cref="SetPoints(ulong, int, string)"/>.</remarks>
     void AddPoints(ulong steamId, int amount, string reason, bool showMessage = true);
+
+    /// <inheritdoc cref="AddPoints(ulong, int, string, bool)"/>
     void AddPoints(IPlayer player, int amount, string reason, bool showMessage = true);
 
     RanksPlayerSnapshot? GetSnapshot(ulong steamId);
@@ -66,7 +78,15 @@ public interface IRanksApi
     event Action<RanksPlayerSnapshot> PlayerDataLoaded;
 
     event Action<RanksPointsChangingArgs> PointsChanging;
+
+    /// <summary>Raised after a player's total changed.</summary>
+    /// <remarks>
+    /// Also raised for core's <c>!setpoints</c> naming the total the player already has — reason <c>admin.set</c>,
+    /// <c>Delta</c> 0 and <c>OldPoints</c> equal to <c>NewPoints</c> — so a rating module still takes the admin's
+    /// value in (FR-CMD-03). No other unchanged total is reported.
+    /// </remarks>
     event Action<RanksPointsChangedArgs> PointsChanged;
+
     event Action<RanksRankChangedArgs> RankChanged;
     event Action<RanksPlayerSnapshot> PlayerDataSaved;
 
@@ -74,6 +94,11 @@ public interface IRanksApi
     event Action<IReadOnlyList<ulong>> PlayersPurged;
 
     /// <summary>Core's quiet window, raised after core's own maintenance completes (FR-DB-09).</summary>
+    /// <remarks>
+    /// Raised once after the pass a server start forces, then after each later pass, which runs only on an empty
+    /// server, every <c>Database.MaintenanceIntervalHours</c> while that is above 0. A load of core into a running
+    /// server forces no pass. Core does not wait for subscribers, so hand heavy work to a background task.
+    /// </remarks>
     event Action MaintenanceDue;
 
     // ---- FR-API-11 kill arbitration ------------------------------------------
@@ -81,26 +106,32 @@ public interface IRanksApi
     /// <summary>Registers the arbiter core consults before awarding a kill, or null to clear it.</summary>
     /// <remarks>
     /// At most one is active: a second registration replaces the first, the same single-authority
-    /// constraint as absolute scoring (FR-PTS-00). Core does not police the operator pairing it
-    /// with a rating module.
+    /// constraint as absolute scoring (FR-PTS-00). While a module holds the scoring claim core still
+    /// asks the arbiter about every kill, but pays nothing it claims (FR-API-14).
     /// </remarks>
     void SetKillArbiter(IRanksKillArbiter? arbiter);
 
     // ---- FR-API-05 gates and settings ----------------------------------------
 
+    /// <summary>Whether core would award points right now: <c>UseCoreRankingLogic</c> on, no module holding the scoring claim, and play counted.</summary>
     bool ArePointsEnabled { get; }
 
     /// <summary>Whether core counts play at all: <c>MinPlayers</c> met, not a warmup <c>WarmupPoints</c> excludes, and no bots-only team while <c>BotsEnabled</c> is off.</summary>
     /// <remarks>
-    /// While false core records no points and no counter except playtime, which measures time
-    /// connected rather than play (FR-PTS-03). A module keeping its own statistics asks per event;
+    /// While false core awards no points of its own and records no counter except playtime, which
+    /// measures time connected rather than play (FR-PTS-03); a module's <c>AddPoints</c> and
+    /// <c>SetPoints</c> still land. A module keeping its own statistics asks per event;
     /// core decides once per server tick, so the module gets the answer core used for the same
-    /// event. Ignores <c>UseCoreRankingLogic</c>. A single interaction with a bot is still the
-    /// caller's call, made with <c>BotsEnabled</c>.
+    /// event. Ignores <c>UseCoreRankingLogic</c> and the scoring claim. A single interaction with a
+    /// bot is still the caller's call, made with <c>BotsEnabled</c>.
     /// </remarks>
     bool IsPlayCounted { get; }
 
     /// <summary>A fresh snapshot per call, so it tracks live config reloads.</summary>
+    /// <remarks>
+    /// <c>UseCoreRankingLogic</c> is what the operator configured, which a scoring claim overrides
+    /// without rewriting. Whether core is scoring is <see cref="ArePointsEnabled"/> and <see cref="ScoringOwner"/>.
+    /// </remarks>
     RanksPointSettings GetPointSettings();
 
     // ---- FR-API-06 database coordination -------------------------------------
@@ -112,8 +143,11 @@ public interface IRanksApi
 
     /// <summary>Hands an assembly's migrations to core, which owns the runner.</summary>
     /// <remarks>
-    /// Call from the handshake, not <c>Load</c> — there is no API yet in <c>Load</c>. Idempotent:
-    /// core dedupes on (assembly, pluginId) and migrates each exactly once per process.
+    /// Call from the handshake, not <c>Load</c> — there is no API yet in <c>Load</c>. Idempotent: core dedupes on
+    /// (assembly, pluginId) and migrates each once per load of core. At server start that happens once every plugin has
+    /// loaded. Later — a module loaded or updated on a running server, or every module after core itself reloads, which
+    /// keeps no record of earlier runs — core migrates it in the background, one module at a time, starting as this call
+    /// returns. Until that finishes, a table it creates may not exist yet, so a module retries a write that fails.
     /// </remarks>
     void RegisterMigrations(Assembly assembly, string pluginId);
 
@@ -138,7 +172,8 @@ public interface IRanksApi
 
     /// <summary>Overlays what the scoreboard shows for one player, leaving stored points alone.</summary>
     /// <remarks>
-    /// Applies immediately. Every display surface core owns — the rank icon, the mode it is drawn
+    /// Applies at once on the game thread; called from another thread, on the next game tick, and only while the
+    /// player still holds their slot. Every display surface core owns — the rank icon, the mode it is drawn
     /// in, the clan tag and the synced score — is resolved from the overlay, so a module never has
     /// to write those fields itself and never fights core for the tag (FR-API-02).
     /// <para>
@@ -148,6 +183,8 @@ public interface IRanksApi
     /// </remarks>
     void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay);
 
+    /// <summary>Removes the player's overlay.</summary>
+    /// <remarks>Threading as <see cref="SetDisplayOverride"/>.</remarks>
     void ClearDisplayOverride(IPlayer player);
 
     RanksDisplayOverride? GetDisplayOverride(IPlayer player);
@@ -215,4 +252,22 @@ public interface IRanksApi
 
     /// <summary>A player's figures for one period, or all time. Null when they hold none there.</summary>
     Task<RanksPlayerSnapshot?> LoadSnapshotAsync(ulong steamId, long period);
+
+    // ---- FR-API-14 scoring claim ---------------------------------------------
+
+    /// <summary>Hands scoring to a rating module: core awards no points of its own while the claim is held.</summary>
+    /// <remarks>
+    /// Overrides <c>Rank.UseCoreRankingLogic</c> without touching the operator's file, and leaves
+    /// <c>AddPoints</c> and <c>SetPoints</c> raw. True again for the holder, so claim from every handshake:
+    /// a core reload builds a new API that holds no claim. False while another module holds it, and always
+    /// for a blank <paramref name="moduleId"/>.
+    /// </remarks>
+    bool ClaimScoring(string moduleId);
+
+    /// <summary>Hands scoring back to core's own switch. A no-op unless <paramref name="moduleId"/> holds the claim.</summary>
+    /// <remarks>Call it from <c>Unload</c>: a claim nobody releases keeps core silent until core itself reloads.</remarks>
+    void ReleaseScoring(string moduleId);
+
+    /// <summary>The module holding the scoring claim, or null while core's own switch decides.</summary>
+    string? ScoringOwner { get; }
 }

@@ -5,14 +5,14 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status">
-  <a href="https://github.com/shmitzas/Ranks/releases/latest"><img src="https://img.shields.io/github/v/release/shmitzas/Ranks?style=flat&logo=github&cacheSeconds=3600" alt="Latest Release"></a>
-  <img src="https://img.shields.io/github/downloads/shmitzas/Ranks/total?style=flat&logo=github&cacheSeconds=3600" alt="Downloads">
-  <img src="https://img.shields.io/github/stars/shmitzas/Ranks?style=flat&logo=github&cacheSeconds=3600" alt="Stars">
+  <a href="https://github.com/SwiftlyS2-Plugins/Ranks/releases/latest"><img src="https://img.shields.io/github/v/release/SwiftlyS2-Plugins/Ranks?style=flat&logo=github&cacheSeconds=3600" alt="Latest Release"></a>
+  <img src="https://img.shields.io/github/downloads/SwiftlyS2-Plugins/Ranks/total?style=flat&logo=github&cacheSeconds=3600" alt="Downloads">
+  <img src="https://img.shields.io/github/stars/SwiftlyS2-Plugins/Ranks?style=flat&logo=github&cacheSeconds=3600" alt="Stars">
 </p>
 
 > [!NOTE]
 > **Migrating from another ranking plugin?**<br>
-> [Ranks_Importer](https://github.com/shmitzas/PluginDataImporters)
+> [Ranks_Importer](https://github.com/SwiftlyS2-Plugins/PluginDataImporters)
 > is a separate one-shot tool that imports from:
 > - **[LVL Ranks](https://github.com/Pisex/cs2-lvl_ranks)** - by [Pisex](https://github.com/Pisex) — the original, plus its [modules](https://github.com/Pisex/cs2-lvl_ranks_modules)
 > - **[K4-LevelRanks-SwiftlyS2](https://github.com/K4ryuu/K4-LevelRanks-SwiftlyS2)** - by [K4ryuu](https://github.com/K4ryuu) — now archived
@@ -82,4 +82,4 @@ Official modules. **[Modules Overview](../../wiki/Modules)** covers installing t
 
 ## 🤝 Report issues or request features
 
-- **Issues**: [GitHub Issues](https://github.com/shmitzas/Ranks/issues)
+- **Issues**: [GitHub Issues](https://github.com/SwiftlyS2-Plugins/Ranks/issues)

@@ -58,14 +58,26 @@ internal sealed class RanksBridge
     /// <summary>Raised once core reports ready, so the plugin can run its one-shot wiring.</summary>
     public event Action? CoreReady;
 
-    /// <summary>Swaps the rule set in after a config reload.</summary>
-    /// <remarks>Held even while core is absent, so the arbiter is built with current rules.</remarks>
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    /// <summary>Raised on the game thread in core's maintenance window: after the pass a server start forces, and later only on an empty server.</summary>
+    public event Action? MaintenanceDue;
+
+    /// <summary>Swaps the rule set in after a config reload, then onto the arbiter while Ranks is bound.</summary>
+    /// <remarks>
+    /// Names no contract type: the reload callback calls it unguarded, and without Ranks.Contract the JIT would throw
+    /// there. The rules are stored either way, so a later bind hands them to the arbiter.
+    /// </remarks>
     public void UpdateRules(ComboMatcher matcher, bool suppress)
     {
         _matcher = matcher;
         _suppress = suppress;
 
+        if (IsAvailable) RefreshArbiter(matcher, suppress);
+    }
+
+    /// <summary>Hands a rule set to the arbiter core consults.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RefreshArbiter(ComboMatcher matcher, bool suppress)
+    {
         if (_arbiter is ComboArbiter arbiter) arbiter.UpdateRules(matcher, suppress);
     }
 
@@ -128,22 +140,61 @@ internal sealed class RanksBridge
         }
     }
 
-    /// <remarks>Idempotent — the handshake re-runs on every plugin load and unload.</remarks>
+    /// <remarks>
+    /// Idempotent — the handshake re-runs on every plugin load and unload. An arbiter kept from an earlier bind is handed
+    /// the stored rules, since a reload made while Ranks was not bound only stored them.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Attach(IRanksApi api)
     {
-        _module ??= new CustomCombosModule(api, _core, _writer, _counters, _menus, () => CoreReady?.Invoke());
+        var module = ModuleFor(api);
 
         // Constructed here rather than in the plugin's Load: ComboArbiter implements a contract
         // interface, so merely naming it outside an isolated method would resolve Ranks.Contract
         // on a server that has no Ranks installed.
         _arbiter ??= new ComboArbiter(_core, _matcher, _suppress, _counters, PlayCounted, _logger);
+        RefreshArbiter(_matcher, _suppress);
 
-        ((CustomCombosModule)_module).Register();
-        ((CustomCombosModule)_module).HandOverMigrations(typeof(RanksBridge).Assembly);
+        module.Register();
+        module.HandOverMigrations(typeof(RanksBridge).Assembly);
 
         // Registering the arbiter is what makes core consult us before it awards a kill.
         api.SetKillArbiter((ComboArbiter)_arbiter);
+    }
+
+    /// <summary>The module bound to <paramref name="api"/>, built afresh when a core reload has handed over a new instance.</summary>
+    /// <remarks>
+    /// A module's <c>Api</c> is fixed at construction, and a core reload clears the events and menu entries the
+    /// old instance fed — kept, the module would stay deaf to the new core. Its state lives in this plugin
+    /// (writer, counters, menus, arbiter), so nothing is lost, and <c>Register</c> replays <c>OnCoreReady</c>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private CustomCombosModule ModuleFor(IRanksApi api)
+    {
+        if (_module is CustomCombosModule current && current.IsBoundTo(api)) return current;
+
+        if (_module is CustomCombosModule stale) Retire(stale);
+
+        var module = new CustomCombosModule(
+            api, _core, _writer, _counters, _menus, () => CoreReady?.Invoke(), () => MaintenanceDue?.Invoke());
+        _module = module;
+
+        return module;
+    }
+
+    /// <summary>Unsubscribes a module from the core instance that unloaded under it.</summary>
+    /// <remarks>Guarded: that core is gone, so a failure here costs nothing and must not stop the rebind.</remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Retire(CustomCombosModule stale)
+    {
+        try
+        {
+            stale.Unregister();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_CustomCombos: could not unsubscribe from the Ranks instance that unloaded.");
+        }
     }
 
     /// <summary>Core's play gate, asked by the arbiter before it counts anything.</summary>
@@ -178,6 +229,11 @@ internal sealed class RanksBridge
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private bool ReadPointsGate() => _api is IRanksApi api && api.ArePointsEnabled;
+
+    /// <summary>The module holding core's scoring claim, or null while there is none (FR-API-14).</summary>
+    /// <remarks>Throws MissingMethodException against a Ranks older than 1.5.0; the plugin catches it.</remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public string? ScoringOwner() => _api is IRanksApi api ? api.ScoringOwner : null;
 
     /// <summary>Core's current period while it runs periods; null while they are off or core is absent.</summary>
     /// <remarks>
@@ -220,17 +276,29 @@ internal sealed class CustomCombosModule : RanksModuleBase
     private readonly ComboCounters _counters;
     private readonly ComboMenus _menus;
     private readonly Action _onCoreReady;
+    private readonly Action _onMaintenanceDue;
 
-    public CustomCombosModule(IRanksApi api, ISwiftlyCore core, Writer writer, ComboCounters counters, ComboMenus menus, Action onCoreReady)
+    public CustomCombosModule(
+        IRanksApi api,
+        ISwiftlyCore core,
+        Writer writer,
+        ComboCounters counters,
+        ComboMenus menus,
+        Action onCoreReady,
+        Action onMaintenanceDue)
         : base(api, core)
     {
         _writer = writer;
         _counters = counters;
         _menus = menus;
         _onCoreReady = onCoreReady;
+        _onMaintenanceDue = onMaintenanceDue;
     }
 
     public override string ModuleId => "Ranks_CustomCombos";
+
+    /// <summary>True when this module was built for <paramref name="api"/>.</summary>
+    public bool IsBoundTo(IRanksApi api) => ReferenceEquals(Api, api);
 
     /// <summary>Hands this assembly's migrations to core.</summary>
     public void HandOverMigrations(Assembly assembly) => RegisterMigrations(assembly);
@@ -271,6 +339,9 @@ internal sealed class CustomCombosModule : RanksModuleBase
     /// to look the player up (FR-DB-08).
     /// </remarks>
     protected override void OnPlayersPurged(IReadOnlyList<ulong> steamIds) => _ = _writer.PurgeAsync(steamIds);
+
+    /// <remarks>Core does not wait for subscribers, and the window is for work players would otherwise feel (FR-DB-09).</remarks>
+    protected override void OnMaintenanceDue() => _onMaintenanceDue();
 }
 
 /// <summary>Answers core's per-kill question (FR-API-11).</summary>

@@ -55,15 +55,29 @@ internal sealed class RanksBridge
     /// </remarks>
     public void AttachMenus(PrestigeMenus menus) => _menus = menus;
 
-    /// <summary>Swaps the ladder in after a config reload, then re-applies to everyone present.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    /// <summary>Swaps the ladder in after a config reload, then re-applies it to everyone present while Ranks is bound.</summary>
+    /// <remarks>
+    /// Names no contract type: the reload callback calls it unguarded, and without Ranks.Contract the JIT would throw
+    /// there. The ladder and config are stored either way, so a later bind builds its module from them.
+    /// </remarks>
     public void UpdateLadder(PrestigeLadder ladder, PrestigeConfig config)
     {
         _ladder = ladder;
         _config = config;
 
+        if (IsAvailable) RefreshModule(ladder, config);
+    }
+
+    /// <summary>Hands a reloaded ladder and config to the module serving Ranks.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RefreshModule(PrestigeLadder ladder, PrestigeConfig config)
+    {
         if (_module is PrestigeModule module) module.Refresh(ladder, config);
     }
+
+    /// <summary>True while Ranks is bound and <paramref name="module"/> is the module serving it.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool Serves(PrestigeModule module) => IsAvailable && ReferenceEquals(_module, module);
 
     /// <summary>The player's current standing, or null when core is absent or has no record yet.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -138,27 +152,63 @@ internal sealed class RanksBridge
 
     /// <remarks>Idempotent — the handshake re-runs on every plugin load and unload.</remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Attach(IRanksApi api)
-    {
-        _module ??= new PrestigeModule(api, _core, _ladder, _config, _menus, _logger);
+    private void Attach(IRanksApi api) => ModuleFor(api).Register();
 
-        ((PrestigeModule)_module).Register();
+    /// <summary>The module bound to <paramref name="api"/>, built afresh when a core reload has handed over a new instance.</summary>
+    /// <remarks>
+    /// A module's <c>Api</c> is fixed at construction, and a core reload clears the events and menu entries the
+    /// old instance fed — kept, nobody's prestige would follow their points on the new core. The ladder and config
+    /// live on this bridge, so nothing is lost, and <c>Register</c> replays <c>OnCoreReady</c>, which re-applies
+    /// every overlay.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private PrestigeModule ModuleFor(IRanksApi api)
+    {
+        if (_module is PrestigeModule current && current.IsBoundTo(api)) return current;
+
+        if (_module is PrestigeModule stale) Retire(stale);
+
+        var module = new PrestigeModule(this, api, _core, _ladder, _config, _menus, _logger);
+        _module = module;
+
+        return module;
     }
 
+    /// <summary>Unsubscribes a module from the core instance that unloaded under it.</summary>
+    /// <remarks>
+    /// Overlays are left alone: they lived on that core's records, which went with it. Guarded, because that core
+    /// is gone, so a failure here costs nothing and must not stop the rebind.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Retire(PrestigeModule stale)
+    {
+        try
+        {
+            stale.Unregister();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_Prestige: could not unsubscribe from the Ranks instance that unloaded.");
+        }
+    }
+
+    /// <remarks>Unbound first, so an overlay pass already queued for the module finds it retired and skips.</remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void Unwire()
     {
-        // Overlays are core-side state keyed to a live session, so leaving them behind would show
-        // every player a deduction with nothing left running to maintain or explain it.
-        if (_module is PrestigeModule module)
-        {
-            module.ClearEveryone();
-            module.Unregister();
-        }
+        var module = _module as PrestigeModule;
 
         _module = null;
         _api = null;
         IsAvailable = false;
+
+        // Overlays are core-side state keyed to a live session, so leaving them behind would show
+        // every player a deduction with nothing left running to maintain or explain it.
+        if (module is not null)
+        {
+            module.ClearEveryone();
+            module.Unregister();
+        }
     }
 }
 
@@ -170,6 +220,7 @@ internal sealed class RanksBridge
 /// </remarks>
 internal sealed class PrestigeModule : RanksModuleBase
 {
+    private readonly RanksBridge _bridge;
     private readonly ILogger _logger;
     private readonly PrestigeMenus _menus;
 
@@ -177,9 +228,11 @@ internal sealed class PrestigeModule : RanksModuleBase
     private PrestigeConfig _config;
 
     public PrestigeModule(
-        IRanksApi api, ISwiftlyCore core, PrestigeLadder ladder, PrestigeConfig config, PrestigeMenus menus, ILogger logger)
+        RanksBridge bridge, IRanksApi api, ISwiftlyCore core, PrestigeLadder ladder, PrestigeConfig config,
+        PrestigeMenus menus, ILogger logger)
         : base(api, core)
     {
+        _bridge = bridge;
         _ladder = ladder;
         _config = config;
         _menus = menus;
@@ -187,6 +240,9 @@ internal sealed class PrestigeModule : RanksModuleBase
     }
 
     public override string ModuleId => "Ranks_Prestige";
+
+    /// <summary>True when this module was built for <paramref name="api"/>.</summary>
+    public bool IsBoundTo(IRanksApi api) => ReferenceEquals(Api, api);
 
     /// <remarks>
     /// The label is this module's own translation — core ships no key for a screen it does not
@@ -197,29 +253,58 @@ internal sealed class PrestigeModule : RanksModuleBase
     protected override void OnCoreReady()
     {
         RegisterMenuEntry(RanksMenuSections.Statistics, Core.Localizer["menu.prestige.title"], _menus.Build, order: 40);
-        ApplyEveryone();
+        OnGameThread(ApplyEveryone);
+    }
+
+    /// <summary>Runs <paramref name="work"/> now when on the game thread, else on its next tick unless this module is retired by then.</summary>
+    /// <remarks>
+    /// The handshake raising <c>OnCoreReady</c> and a reload calling <see cref="Refresh"/> may run on a pool thread, where an
+    /// overlay write reaches a controller. Skipped once an Unload has cleared every overlay or a core reload retired the module.
+    /// </remarks>
+    private void OnGameThread(Action work)
+    {
+        if (Core.IsGameThread) work();
+        else Core.Scheduler.NextTick(() => { if (_bridge.Serves(this)) work(); });
     }
 
     public void ApplyEveryone()
     {
         foreach (var player in Core.PlayerManager.GetAllPlayers())
-            if (!player.IsFakeClient)
-                ApplyTo(player);
+            ForHuman(player, ApplyTo);
     }
 
+    /// <summary>Swaps the ladder and config in after a reload, then re-applies everyone's overlay on the game thread.</summary>
+    /// <remarks>The reload callback runs on the file watcher's thread, and a Ranks older than 1.5.0 writes an overlay on whichever thread asks.</remarks>
     public void Refresh(PrestigeLadder ladder, PrestigeConfig config)
     {
         _ladder = ladder;
         _config = config;
 
-        ApplyEveryone();
+        OnGameThread(ApplyEveryone);
     }
 
     public void ClearEveryone()
     {
         foreach (var player in Core.PlayerManager.GetAllPlayers())
-            if (!player.IsFakeClient)
-                SafeClear(player);
+            ForHuman(player, SafeClear);
+    }
+
+    /// <summary>Runs <paramref name="work"/> for one player of a pass over everyone, skipping bots, so no player can stop the pass.</summary>
+    /// <remarks>
+    /// A player who disconnects mid-pass is disposed, and then every read of them throws: <c>IsFakeClient</c> here,
+    /// <c>SteamID</c> in the failure logs <paramref name="work"/> writes. The slot is logged instead, which a disposed
+    /// player still answers. <see cref="ClearEveryone"/> runs from Unload, which may be off the game thread.
+    /// </remarks>
+    private void ForHuman(IPlayer player, Action<IPlayer> work)
+    {
+        try
+        {
+            if (!player.IsFakeClient) work(player);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Ranks_Prestige: could not update the overlay for slot {Slot}.", player.Slot);
+        }
     }
 
     protected override void OnPlayerDataLoaded(RanksPlayerSnapshot player)

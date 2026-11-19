@@ -8,6 +8,7 @@ using Ranks.Players;
 using Ranks.Ranking;
 using Ranks.Scoreboard;
 using Ranks.Scoring;
+using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Players;
 
 namespace Ranks.Api;
@@ -15,11 +16,12 @@ namespace Ranks.Api;
 /// <summary>Core's implementation of <c>Ranks.Api.v1</c>.</summary>
 /// <remarks>
 /// A thin facade: every member delegates to the service that owns the behaviour, so there is no
-/// second copy of a rule here. Rebuilt on reconfiguration — the event hub it forwards to is
-/// cleared with it, or handlers accumulate across the handshake (FR-API-04).
+/// second copy of a rule here. Built once per load of core and republished, the same instance, on every handshake
+/// rebuild, so a subscription made through it lasts until core unloads; a core reload builds a new one (FR-API-04).
 /// </remarks>
 internal sealed class RanksApi : IRanksApi
 {
+    private readonly ISwiftlyCore _core;
     private readonly ConfigHost<RanksConfig> _config;
     private readonly ConfigHost<PointsConfig> _points;
     private readonly PlayerRegistry _registry;
@@ -36,6 +38,7 @@ internal sealed class RanksApi : IRanksApi
     private readonly ILogger _logger;
 
     public RanksApi(
+        ISwiftlyCore core,
         ConfigHost<RanksConfig> config,
         ConfigHost<PointsConfig> points,
         PlayerRegistry registry,
@@ -51,6 +54,7 @@ internal sealed class RanksApi : IRanksApi
         RanksEventHub events,
         ILogger logger)
     {
+        _core = core;
         _config = config;
         _points = points;
         _registry = registry;
@@ -135,7 +139,28 @@ internal sealed class RanksApi : IRanksApi
 
     public int GetPoints(IPlayer player) => GetPoints(player.SteamID);
 
-    public void SetPoints(ulong steamId, int points, string reason)
+    public void SetPoints(ulong steamId, int points, string reason) => OnGameThread(() => SetPointsNow(steamId, points, reason));
+
+    public void SetPoints(IPlayer player, int points, string reason) =>
+        ForPlayerOnGameThread(player, current => SetPointsNow(current.SteamID, points, reason));
+
+    public void AddPoints(ulong steamId, int amount, string reason, bool showMessage = true) =>
+        OnGameThread(() => AddPointsNow(steamId, amount, reason, showMessage));
+
+    public void AddPoints(IPlayer player, int amount, string reason, bool showMessage = true) =>
+        ForPlayerOnGameThread(player, current => AddPointsNow(current.SteamID, amount, reason, showMessage));
+
+    /// <summary>Core's <c>!setpoints</c>: <see cref="SetPoints(ulong, int, string)"/>, reported to modules even when the total already stood there.</summary>
+    /// <remarks>Not part of the contract — only core's own command reports an unchanged total (FR-CMD-03).</remarks>
+    public void SetPointsAsAdmin(ulong steamId, int points, string reason) => OnGameThread(() =>
+    {
+        if (_registry.BySteamId(steamId) is not { } record) return;
+
+        _awards.SetPointsAsAdmin(record, points, reason);
+        _scoreboard.Apply(steamId);
+    });
+
+    private void SetPointsNow(ulong steamId, int points, string reason)
     {
         if (_registry.BySteamId(steamId) is not { } record) return;
 
@@ -143,9 +168,7 @@ internal sealed class RanksApi : IRanksApi
         _scoreboard.Apply(steamId);
     }
 
-    public void SetPoints(IPlayer player, int points, string reason) => SetPoints(player.SteamID, points, reason);
-
-    public void AddPoints(ulong steamId, int amount, string reason, bool showMessage = true)
+    private void AddPointsNow(ulong steamId, int amount, string reason, bool showMessage)
     {
         if (_registry.BySteamId(steamId) is not { } record) return;
 
@@ -153,8 +176,49 @@ internal sealed class RanksApi : IRanksApi
         _scoreboard.Apply(steamId);
     }
 
-    public void AddPoints(IPlayer player, int amount, string reason, bool showMessage = true) =>
-        AddPoints(player.SteamID, amount, reason, showMessage);
+    /// <summary>Runs a write now on the game thread, else on its next tick.</summary>
+    /// <remarks>
+    /// Records, the scoreboard and the events a write raises all belong to the game thread, and a module may call from
+    /// any thread (FR-API-02). Posted after core unloaded, the write is dropped with the registry it would have changed.
+    /// </remarks>
+    private void OnGameThread(Action write)
+    {
+        if (_core.IsGameThread)
+        {
+            write();
+            return;
+        }
+
+        try
+        {
+            _core.Scheduler.NextTick(write);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>Runs a write for <paramref name="player"/> now on the game thread, else on its next tick if they are still connected.</summary>
+    /// <remarks>
+    /// A disconnected player's <c>IPlayer</c> is disposed and throws, so a deferred write finds the player again by slot
+    /// and SteamID, and is skipped when someone else holds the slot by then.
+    /// </remarks>
+    private void ForPlayerOnGameThread(IPlayer player, Action<IPlayer> write)
+    {
+        if (_core.IsGameThread)
+        {
+            write(player);
+            return;
+        }
+
+        var slot = player.Slot;
+        var steamId = player.SteamID;
+
+        OnGameThread(() =>
+        {
+            if (_core.PlayerManager.GetPlayer(slot) is { } current && current.SteamID == steamId) write(current);
+        });
+    }
 
     public RanksPlayerSnapshot? GetSnapshot(ulong steamId) =>
         _registry.BySteamId(steamId) is { } record ? _sessions.Snapshot(record) : null;
@@ -266,6 +330,15 @@ internal sealed class RanksApi : IRanksApi
 
     public bool IsPlayCounted => _awards.IsPlayCounted;
 
+    /// <summary>Hands scoring to <paramref name="moduleId"/>, unless another module already holds it or the id is blank (FR-API-14).</summary>
+    public bool ClaimScoring(string moduleId) => _awards.ClaimScoring(moduleId);
+
+    /// <summary>Hands scoring back to <c>Rank.UseCoreRankingLogic</c>, when <paramref name="moduleId"/> holds it.</summary>
+    public void ReleaseScoring(string moduleId) => _awards.ReleaseScoring(moduleId);
+
+    /// <summary>The module holding the scoring claim, or null.</summary>
+    public string? ScoringOwner => _awards.ScoringOwner;
+
     public RanksPointSettings GetPointSettings()
     {
         var config = _config.Current;
@@ -299,19 +372,16 @@ internal sealed class RanksApi : IRanksApi
 
     public void UnregisterMenuEntries(string moduleId) => _menuEntries.RemoveAll(moduleId);
 
-    public void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay)
+    public void SetDisplayOverride(IPlayer player, RanksDisplayOverride overlay) =>
+        ForPlayerOnGameThread(player, current => ApplyDisplayOverride(current, overlay));
+
+    public void ClearDisplayOverride(IPlayer player) => ForPlayerOnGameThread(player, current => ApplyDisplayOverride(current, null));
+
+    private void ApplyDisplayOverride(IPlayer player, RanksDisplayOverride? overlay)
     {
         if (_registry.BySlot(player.Slot) is not { } record) return;
 
         record.DisplayOverride = overlay;
-        _scoreboard.Apply(player);
-    }
-
-    public void ClearDisplayOverride(IPlayer player)
-    {
-        if (_registry.BySlot(player.Slot) is not { } record) return;
-
-        record.DisplayOverride = null;
         _scoreboard.Apply(player);
     }
 

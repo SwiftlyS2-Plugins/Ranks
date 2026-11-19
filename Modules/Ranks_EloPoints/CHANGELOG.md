@@ -14,9 +14,38 @@ Notable changes to Ranks_EloPoints, newest first.
 
      See .github/instructions/changelog.instructions.md for the full style. -->
 
+## [1.2.0] - 2026-11-17
+
+Worth updating on every server that runs it.
+
+- Ratings now build on every match a player stays for. Before, each match was rated from
+  the rating the player joined with, so only their last match before leaving counted.
+- A player's exact rating is no longer replaced by their rounded points when they join.
+- Players moving over from core's own scoring keep their points as their starting rating.
+  Some started from `Rank.StartPoints` instead.
+- A player whose Steam authorization finishes after they enter the server, or who enters
+  before Ranks is loaded, is now rated. Before, they went unrated until they reconnected.
+- A stored rating that cannot be read when a player joins, for example during a database
+  restart, is read again over the next minute instead of the player being rated from their
+  rounded points for good.
+- Reloading the module on a running server, from the console or from another plugin, now
+  rates the players already there from the next match on, instead of nobody until they
+  reconnected.
+- Reloading Ranks on a running server no longer stops resets, new seasons and admin point
+  commands from reaching ratings.
+- With Ranks 1.5.0, core's own scoring switches off by itself while this module runs, so
+  `Rank.UseCoreRankingLogic` no longer needs changing. On an older Ranks, keep it at `false`.
+- `!setpoints`, `!givepoints` and `!removepoints` now change the player's rating, instead of
+  being undone at their next reconnect or match end
+  ([wiki](https://github.com/SwiftlyS2-Plugins/Ranks/wiki/Module-EloPoints#admin-commands)).
+- A purge that fails, for example during an outage, is retried with the next save instead
+  of leaving the purged players their old ratings.
+- A reset or purge the database refuses three times, for example without `DELETE`
+  permission, is dropped with an error. Before, such a reset stopped every later save.
+
 ## [1.1.2] - 2026-11-09
 
-- No changes; released alongside Ranks 1.3.2.
+- No changes; released alongside Ranks 1.4.0.
 
 ## [1.1.1] - 2026-11-08
 

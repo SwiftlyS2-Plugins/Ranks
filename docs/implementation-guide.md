@@ -135,6 +135,10 @@ ctor → Load(hotReload) → ConfigureSharedInterface → UseSharedInterface
 
 Each shared-interface stage runs for **every** plugin before the next begins:
 all plugins register, then all plugins resolve, then all plugins react.
+`OnAllPluginsLoaded` closes the sequence at server start only — a hot load or
+reload runs `Load(true)` and the three handshake stages, and stops there. A new
+plugin SwiftlyS2's file watcher sees created runs `Load(true)` alone, with no
+handshake until another load, reload or unload rebuilds it.
 
 `Load(bool)` and `Unload()` are **`abstract`** — they must be implemented. The
 four shared-interface / lifecycle hooks are `virtual`. `Unload()` takes **no
@@ -156,10 +160,10 @@ before wiring DI, config and logging. Everything touching `Core.*` goes in
 
 | Stage | Put here | Never here |
 |---|---|---|
-| `Load` | config binding, schema check, event hooks, command registration, building the API instance | — |
+| `Load` | config binding, schema check, event hooks, command registration, building the API instance, raising `CoreReady` last | — |
 | `ConfigureSharedInterface` | `AddSharedInterface` of the already-built instance | building anything |
 | `UseSharedInterface` / `OnSharedInterfaceInjected` | acquiring *other* plugins' interfaces, fail-closed | `HookPost`, bare `+=`, logging |
-| `OnAllPluginsLoaded` | one-shot absence reports, the `UseCoreRankingLogic` warning, raising `CoreReady` | — |
+| `OnAllPluginsLoaded` | server start only: migrating registered modules, the forced maintenance pass, one-shot absence reports, the `UseCoreRankingLogic` warning — cancelling the delayed copy of it a load that found a map up scheduled | — |
 | `Unload` | unsubscribe, flush, dispose | — |
 
 The handshake re-runs on **every** plugin load *and* unload, for every loaded
@@ -199,15 +203,40 @@ Two further silent-failure modes on the same path:
 Method visibility is not a factor — the framework's own examples decorate
 `private` methods.
 
-### 2.4 `Load(hotReload: true)`
+### 2.4 Loading into a running server
 
 Re-adopt already-connected players rather than starting empty (NFR-05). Iterate
 `Core.PlayerManager`, filter `IsFakeClient`, and load records for everyone
-already `IsAuthorized`.
+already `IsAuthorized` — on the game thread, with the rank reveal re-sent beside it:
+inline when `Load` runs there, as a console load does, otherwise on the next tick.
+SwiftlyS2's file watcher runs `Load` on a pool thread, and a plugin-API load on the
+caller's, while tracking reads each player's name and the reveal is a user message.
+
+Decide "running server" as `hotReload || MapIsLoaded()`, never from the flag:
+SwiftlyS2's plugin API (`IPluginManager.LoadPlugin` / `ReloadPlugin` →
+`LoadPluginById`) passes `hotReload: false` on a running server. SwiftlyS2 loads
+plugins while it starts, before the first map, where `Core.Engine.GlobalVars`
+throws; a later load normally finds a map up. The probe wraps
+that one read in a `try`/`catch` (NFR-04), and modules decide the same way.
+
+A plugin-API load can also land mid-changelevel. `GlobalVars` is the engine's
+`GetServerGlobals()`, passed through as is, and nothing shows it stays readable
+between maps — so a load that finds no map is a start only once SwiftlyS2 confirms it
+with `OnAllPluginsLoaded`. SwiftlyS2 raises that synchronously inside its own start,
+and ticks are driven by the engine's `GameFrame`, so every real start has it before
+its first tick. Work only a start may do — the forced maintenance pass (§4.8) — runs
+from `OnAllPluginsLoaded`; a load still without it at its first tick switches on the
+running-server path instead: core migrates modules as they register, draining what is
+already queued, and runs its delayed scoring check, as CustomCombos does its own.
+SwiftlyS2 itself loading mid-game finds a map up and still raises `OnAllPluginsLoaded`,
+which cancels the delayed check before running its own. Nothing re-adopts players:
+every map load puts each of them in server again, which is where core and the modules
+pick them up. The modules' orphan sweeps take no part in the decision: they run from
+the `MaintenanceDue` that the forced pass, or a later pass on an empty server, raises.
 
 ### 2.5 Raising `CoreReady` (FR-API-10)
 
-Set `IsCoreReady = true` and raise `CoreReady` from `OnAllPluginsLoaded`, after
+Set `IsCoreReady = true` and raise `CoreReady` at the end of `Load`, after
 config binding and the schema probe — **whether or not the probe passed**. A
 module needs to know core settled either way. Clear handlers in `Unload`.
 
@@ -574,9 +603,37 @@ private void Migrate(Assembly assembly, string ledgerName)
 }
 ```
 
-Core's own schema migrates in `Load`. Registered module assemblies migrate in
+Core's own schema migrates in `Load`, on the loading thread — core cannot serve
+until it knows its schema is usable. Registered module assemblies migrate in
 `OnAllPluginsLoaded`, because that is the first point at which the handshake has
-delivered the API and every module has had a chance to register.
+delivered the API and every module has had a chance to register. It is also the
+only drain — SwiftlyS2 raises `OnAllPluginsLoaded` at server start alone — so from
+then on, and from the start of a core loaded into a running server,
+`SchemaMigrator.Register` queues a module the moment it registers and returns.
+That runs inside the module's handshake, which nothing guards and which a console
+load runs on the game thread, so it never throws and never migrates there: it
+locates the module's file — SwiftlyS2's plugin list is unsafe to read from another
+thread — and chains the run onto one background task, so modules migrate one at
+a time. The two sets and the chain sit behind one lock that no background run holds,
+because a file-watcher reload runs the handshake on a pool thread; `Unload` drops the
+runs not yet started, then waits — up to 8 s, after the final flush — for the one
+already running. Every load of core lives in a load context of its own and shares
+no lock with the last, so a console reload within about a second of the previous
+load would otherwise migrate that module again while the first run still holds its
+ledger. A core that took itself for a server start and still has no
+`OnAllPluginsLoaded` at its first tick (§2.4) switches over then, moving what is
+already queued onto the same chain.
+
+Until a background run finishes — a few hundred milliseconds for an up-to-date
+ledger, measured on SQLite — a module's write to a table the run creates fails.
+Every module writer logs that at `Error`, keeps the change in its retry buffer and
+replays it ahead of its next write, so nothing is lost; a reset or purge is dropped,
+with its own `Error`, only once its own statements have failed three times for a
+reason the driver does not mark transient. A read
+fails too: EloPoints logs a player's first failure at `Error`, stands core's points
+in for the rating and retries the read three times, 5, 15 and then 45 seconds apart;
+a WeaponStats or CustomCombos menu logs it and shows its error line until opened
+again; their published APIs throw to the caller.
 
 A module assembly is **not** scanned as loaded: the module ships its own
 FluentMigrator, so its migrations implement an `IMigration` core's runner does not
@@ -872,6 +929,33 @@ Each player sits behind a **savepoint** so one bad row (an unencodable name)
 skips that player instead of aborting the batch. Mark a record saved only after
 the write commits.
 
+Every player-row write — a batch pass, one player's save, the unload flush — runs
+through one ordered queue in `PlayerSessions`, snapshotted under the queue's lock,
+so commit order is snapshot order and the newest values always land last. Two
+writes on separate connections can commit in either order: a disconnect save
+overtaken by an older batch snapshot leaves the stale row behind a record already
+settled clean and evicted. Settling — the dirty-flag compare, `SettleArchives`,
+`PlayerDataSaved`, the eviction check — is posted to the game thread after the
+commit, fire-and-forget. A save's result never waits for that tick: `FlushOnUnload`
+blocks the game thread on its own queued pass, which settles nothing.
+
+Each snapshot also stamps its record with a rising number, under the same lock, and
+only the settle of the record's newest queued write may clear its dirty flag or evict
+it. With two writes queued — snapshot one, the record moves, snapshot two, it moves
+back — the first settle would otherwise find the record on its values again and mark
+it clean while the row ends on the second write's; nothing would ever rewrite it. An
+older write's settle still clears its archives and raises `PlayerDataSaved`, and a
+newest write that fails leaves the record dirty for the next pass.
+
+Every settle of a record's newest write evicts it when it is clean and no connected
+player is bound to it, whichever write that is — a disconnect save, a module's
+`SavePlayerAsync` for a player who left, a pass — and only while the registry still
+maps that SteamID to that record. Kept until its owner returns, the record would be
+adopted over a row another server sharing the database may have moved since; removed
+by SteamID alone, a settle landing late would drop the newer record a returning
+player loaded. A load publishing after its owner left, or reconnected into another
+slot, binds to the slot they hold by then, or none.
+
 `SaveAllAsync` coalesces: a concurrent call joins the in-flight pass. A module
 calling it every round end on a 64-slot server must cost one pass, not 64.
 
@@ -898,9 +982,20 @@ private async Task TryRunMaintenanceAsync(bool force)
 }
 ```
 
-`Load` calls it with `force: !hotReload`; the round-end handler calls it with
-`force: false`. **A hot reload passes neither**, which is the point — that path
-runs with players connected.
+`OnAllPluginsLoaded` calls it with `force` true, after a `Load` that found no map —
+`!LoadsIntoRunningServer(hotReload)`, never `!hotReload` (§2.4). Not `Load` itself:
+a load that finds no map may be a plugin-API load between maps, which never reaches
+`OnAllPluginsLoaded`, so only a start SwiftlyS2 confirms forces a pass. A load into a
+running server calls it with `force: false` from `Load`, and the round-end handler
+does the same. **That path passes neither force nor an empty server**, which is the
+point — it runs with players connected.
+
+Every pass that completes raises `MaintenanceDue` on the next tick: once after the forced
+pass at a start, then only after a pass on an empty server, which needs
+`Database.MaintenanceIntervalHours` above 0. A module bound only after a load into a
+running server therefore hears nothing until such a pass — at the `0` default, until
+the next start. The WeaponStats and CustomCombos orphan sweeps run from it, once per
+load of the module.
 
 **Roll-up precedes purge and the order is not cosmetic.** Pruning a period
 before folding it into the next tier destroys it silently: the rows are gone and
@@ -922,10 +1017,10 @@ period; `PlayerStore` owns every period-aware statement. Three rules carry it:
   one `ClearProgress`.
 - **An archive is written with its record, never on its own.** `Save` writes each
   pending archive into `ranks_players_history` inside the record's savepoint,
-  then the fresh row. `Settle` runs off the game thread, so it clears archives
-  with a compare-and-swap (`SettleArchives`): a rollover replacing the array
-  mid-write keeps what the write never carried, at the cost of one idempotent
-  re-write.
+  then the fresh row. `Settle` runs a tick after the write commits, so it clears
+  archives with a compare-and-swap (`SettleArchives`): a rollover replacing the
+  array between the snapshot and the settle keeps what the write never carried, at
+  the cost of one idempotent re-write.
 - **Only an older stored period is stale.** `Load` closes it in one transaction —
   `INSERT IGNORE`/`ON CONFLICT DO NOTHING` into history, then an `UPDATE` guarded
   on the stale period — and leaves a newer one alone for the caller to catch up
@@ -999,11 +1094,11 @@ independent of `Rank.BotsEnabled` (FR-DB-07).
 unbanked stretch began. Nothing ticks: the clock is read and banked at the points
 below, which is what keeps playtime off NFR-11's list.
 
-- **Start** when a record binds to a connected player — `Publish`, or `Track`
-  re-adopting a resident record — and only if that player still holds the slot. A
-  load landing after its owner left starts nothing, since no disconnect would
-  follow to stop it. `StartPlaytime` is a no-op on a running clock, because
-  authorize and put-in-server both reach `Track`.
+- **Start** when a record binds to a connected player — `Publish`, on the slot the
+  owner holds when the load lands, or `Track` re-adopting a resident record. A
+  load landing after its owner left binds no slot and starts nothing, since no
+  disconnect would follow to stop it. `StartPlaytime` is a no-op on a running
+  clock, because authorize and put-in-server both reach `Track`.
 - **Bank** with `CreditPlaytime`: whole seconds are added and the start moves
   forward by exactly that much, so the remainder carries over — K4-LevelRanks'
   `UpdatePlaytime` rule. Game thread only: in `SaveAllAsync` and `SavePlayerAsync`
@@ -1102,8 +1197,9 @@ Round **away from zero** at step 5, once, after all multipliers. Rounding per
 multiplier compounds error, and rounding toward zero makes a small non-zero
 award silently `0`.
 
-`UseCoreRankingLogic = false` mutes steps 1–6 entirely. `AddPoints` and
-`SetPoints` skip 1–4 in **both** modes — they are stored raw.
+`UseCoreRankingLogic = false`, or a module's scoring claim (FR-API-14), mutes
+steps 1–6 entirely. `AddPoints` and `SetPoints` skip 1–4 in **both** modes — they
+are stored raw.
 
 ### 6.2 Dynamic kill/death
 
@@ -1459,11 +1555,19 @@ public override void ConfigureSharedInterface(IInterfaceManager im)
 manager (clearing the key set) before re-running registration, so
 re-registration is safe.
 
-**Reset the provider instance on reconfiguration**, or event handlers accumulate
-across rebuilds. The stable *Shared API* guide states the same rule from the
-consumer side: *"Since registration can re-run on hot reload, unsubscribe before
-re-subscribing to provider events in `UseSharedInterface`, or you'll get
-duplicate handlers."*
+**Publish one instance per load, the same one on every rebuild.** Subscriptions
+made through it then survive the rebuild, which never unloads core; a consumer's
+own guard (`RanksModuleBase.Register`) is what keeps it from subscribing twice.
+Clear the event hub in `Unload`, so the instance a module still holds until its
+next handshake keeps none of its handlers. A core reload publishes a new instance
+with no subscribers, which is why a module rebuilds itself against it (§10.6).
+
+**Marshal the writes, not the reads.** `AddPoints`, `SetPoints`,
+`SetDisplayOverride` and `ClearDisplayOverride` touch records and controllers the
+game thread owns, and a module may call them from a background task, so off the
+game thread they run on the next tick — an `IPlayer` overload only once it has
+been found again by slot and SteamID, since a departed player's `IPlayer` is
+disposed and throws.
 
 ### 9.1 Shipping the contract DLL
 
@@ -1550,8 +1654,10 @@ Several `SwiftlyS2-Plugins/VIPCore` modules reset a registration flag at the top
 of `UseSharedInterface` and re-run a method ending in `_vipApi.PlayerLoaded += …`.
 `RegisterFeature` is idempotent (core overwrites `_features[key]`); the `+=`
 lines are **not**, and are only removed in `Unload`. On a busy server that is a
-handler leak with duplicate invocations. Subscribe in `Load`, or guard with a
-flag the handshake does not reset.
+handler leak with duplicate invocations. A module has no shared interface in
+`Load`, so it subscribes to the interface's events from the handshake, through
+`RanksModuleBase.Register`, whose guard the handshake never resets; game-event
+hooks, which need no interface, still belong in `Load`.
 
 ### 10.5 Module database checklist
 
@@ -1582,6 +1688,57 @@ flag the handshake does not reset.
   `ArePeriodsEnabled` is false — core still catches up then), and clear the player's
   current period in `OnPlayerReset`. Never change an existing table's key to add
   a period — add a `_period` or `_history` table with the composite key inline.
+
+### 10.6 Claiming scoring (FR-API-14)
+
+A rating module claims scoring from the bridge's attach path, which every handshake
+runs, and releases it in `Unwire`:
+
+```csharp
+[MethodImpl(MethodImplOptions.NoInlining)]
+private void Attach(IRanksApi api)
+{
+    ClaimScoring();                                   // before Register, so the ready check knows the outcome
+    ModuleFor(api).Register();
+}
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+private MyRatingModule ModuleFor(IRanksApi api)
+{
+    if (_module is MyRatingModule current && current.IsBoundTo(api)) return current;
+
+    if (_module is MyRatingModule stale)
+        try { stale.Unregister(); } catch (Exception) { }   // that core is gone; never stop the rebind
+
+    var module = new MyRatingModule(api, _core);      // Register replays OnCoreReady on it
+    _module = module;
+    return module;
+}
+
+private void ClaimScoring()                           // names no contract type: the catch must sit here
+{
+    try { Claim = RequestClaim(); }
+    catch (MissingMethodException) { Claim = ScoringClaim.Unsupported; }   // core older than the member
+}
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+private ScoringClaim RequestClaim() =>
+    _api is IRanksApi api && api.ClaimScoring(ModuleId) ? ScoringClaim.Held : ScoringClaim.Refused;
+```
+
+- **Claim through the interface the handshake just bound** (`_api`), never the
+  module's `Api`. Until `ModuleFor` rebuilds it, the module still holds the
+  unloaded core's API, while the new core holds no claim at all.
+- **Rebuild the module when the handshake hands over another `IRanksApi`.** A
+  module's `Api` is fixed at construction and a core reload clears the hub it
+  subscribed to, so a module kept with `_module ??=` hears nothing from the new
+  core. Every `OnCoreReady` must therefore be safe to replay.
+- **Release from its own `NoInlining` helper**, reached only after a granted claim.
+  Inline in `Unwire`, a core without the member fails `Unwire` at JIT, before the
+  `Unregister` that follows it.
+- **Report a refusal from the one-shot ready check**, not from the claim — the claim
+  runs per rebuild. Core logs its own side of both outcomes: the refusal, and a
+  grant over `UseCoreRankingLogic = true`.
 
 ---
 
@@ -1709,9 +1866,13 @@ object, and no `catch` becomes silent because verbose logging is off.
 
 Anything on the award path is gated without exception — it runs at kill rate.
 
-`UseCoreRankingLogic = false` logs **one** ungated warning at
-`OnAllPluginsLoaded`. Core has no registry and cannot tell whether a rating
-module is present, so the warning is unconditional and must say so.
+`UseCoreRankingLogic = false` with no module holding the scoring claim logs
+**one** ungated warning at `OnAllPluginsLoaded` — the first point at which every
+module's handshake has had the chance to claim — or, after a load into a running
+server, which never reaches it, a few seconds after `Load`. A claim granted over `true` logs
+one warning naming the module, and a refused claim one error naming both. The
+claim arrives from another plugin's handshake, which re-runs per rebuild, so both
+log only when the holder changes, or once per refused claimant.
 
 ---
 

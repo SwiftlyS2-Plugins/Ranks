@@ -85,6 +85,7 @@ public sealed class RankOptions
     /// <remarks>
     /// <c>false</c> turns core into a host: its handlers award nothing and its gates and
     /// multipliers go inert, while stat counters, the ladder and the API stay live (FR-PTS-00).
+    /// A module's scoring claim does the same whatever this says, and leaves the file alone (FR-API-14).
     /// </remarks>
     public bool UseCoreRankingLogic { get; set; } = true;
 
