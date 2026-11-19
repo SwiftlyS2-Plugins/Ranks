@@ -29,7 +29,12 @@ internal sealed class PlayerSessions
     private readonly ILogger _logger;
 
     private readonly Lock _saveGate = new();
-    private Task<int>? _inFlightSave;
+
+    /// <summary>The last player-row write queued; the next one runs after it.</summary>
+    private Task _saveTail = Task.CompletedTask;
+
+    /// <summary>The batch pass a concurrent <see cref="SaveAllAsync"/> joins until it completes.</summary>
+    private Task<int>? _pendingPass;
 
     /// <remarks>Both triggers reach Track before either load publishes; without this the row is
     /// read twice and PlayerDataLoaded is raised twice.</remarks>
@@ -153,7 +158,7 @@ internal sealed class PlayerSessions
         _ = SaveAllAsync();
     }
 
-    public void Start(bool hotReload)
+    public void Start()
     {
         _core.Event.OnClientSteamAuthorize += OnSteamAuthorized;
         _core.Event.OnClientSteamAuthorizeFail += OnSteamAuthorizeFailed;
@@ -161,10 +166,6 @@ internal sealed class PlayerSessions
         _core.Event.OnClientDisconnected += OnDisconnected;
 
         StartSaveTimer();
-
-        // Load(hotReload: true) runs with players already connected, so their authorize event has
-        // long since fired and waiting for another one would leave the whole server untracked.
-        if (hotReload) AdoptConnectedPlayers();
     }
 
     public void Stop()
@@ -246,7 +247,7 @@ internal sealed class PlayerSessions
 
                 _core.Scheduler.NextTick(() =>
                 {
-                    try { Publish(steamId, slot, name, loaded); }
+                    try { Publish(steamId, name, loaded); }
                     finally { _loading.TryRemove(steamId, out _); }
                 });
             }
@@ -292,7 +293,7 @@ internal sealed class PlayerSessions
         });
     }
 
-    private void Publish(ulong steamId, int slot, string name, PlayerRecord loaded)
+    private void Publish(ulong steamId, string name, PlayerRecord loaded)
     {
         AlignPeriod(loaded);
 
@@ -301,22 +302,26 @@ internal sealed class PlayerSessions
         loaded.RankIndex = _ladder.IndexFor(loaded.Points);
         loaded.Dirty = true;
 
-        var record = _registry.Adopt(slot, loaded);
-        StartPlaytimeIfConnected(record, slot);
+        var record = Seat(loaded);
 
         _detail.Write("Ranks: loaded {SteamId} with {Points} points.", steamId, record.Points);
         _events.RaisePlayerDataLoaded(Snapshot(record));
     }
 
-    /// <summary>Starts the playtime clock, unless the player left while their record was loading.</summary>
+    /// <summary>Publishes a loaded record, binding it to the slot its owner holds now and starting their playtime clock; once they have left, neither.</summary>
     /// <remarks>
-    /// A load landing after its owner's disconnect is still adopted, and no disconnect follows to stop
-    /// a clock started for it — left running, every save would bank time for someone who is not there.
+    /// The owner may have left, or reconnected into another slot, while the load was in flight. On the slot they held
+    /// when it began, the record would be credited with whatever that slot's next occupant does until their own load
+    /// lands; and a clock started for someone already gone banks time forever, since no disconnect follows to stop it.
     /// </remarks>
-    private void StartPlaytimeIfConnected(PlayerRecord record, int slot)
+    private PlayerRecord Seat(PlayerRecord loaded)
     {
-        if (_core.PlayerManager.GetPlayer(slot) is { IsFakeClient: false } player && player.SteamID == record.SteamId)
-            record.StartPlaytime(DateTime.UtcNow);
+        var slot = SlotOf(loaded.SteamId);
+        var record = _registry.Adopt(slot, loaded);
+
+        if (slot >= 0) record.StartPlaytime(DateTime.UtcNow);
+
+        return record;
     }
 
     /// <summary>Brings a record loaded off-thread into the period the server is in now.</summary>
@@ -375,10 +380,15 @@ internal sealed class PlayerSessions
         record.LastSeen = now;
         record.Dirty = true;
 
-        _ = SavePlayerAsync(record.SteamId, evictAfter: true);
+        _ = SavePlayerAsync(record.SteamId);
     }
 
-    private void AdoptConnectedPlayers()
+    /// <summary>Starts tracking everyone already connected and authorized, for a load into a running server.</summary>
+    /// <remarks>
+    /// Their authorize event has long since fired, and waiting for another one would leave the whole server untracked.
+    /// Game thread only: tracking reads each player's name.
+    /// </remarks>
+    public void AdoptConnectedPlayers()
     {
         foreach (var player in _core.PlayerManager.GetAllPlayers())
             if (!player.IsFakeClient && player.IsAuthorized)
@@ -386,36 +396,22 @@ internal sealed class PlayerSessions
     }
 
     /// <summary>Writes one player. False when the SteamID is not tracked.</summary>
-    public async Task<bool> SavePlayerAsync(ulong steamId, bool evictAfter = false)
+    /// <remarks>Queued behind every write already queued (FR-API-09; implementation guide §4.7).</remarks>
+    public Task<bool> SavePlayerAsync(ulong steamId)
     {
-        if (!SchemaUsable) return false;
+        if (!SchemaUsable) return Task.FromResult(false);
 
         var record = _registry.BySteamId(steamId);
-        if (record is null) return false;
+        if (record is null) return Task.FromResult(false);
 
         if (_core.IsGameThread) record.CreditPlaytime(DateTime.UtcNow);
 
-        var row = PlayerSnapshotRow.From(record);
-
-        var ok = await Task.Run(() =>
+        lock (_saveGate)
         {
-            try
-            {
-                var outcome = _store.Save([row]);
-                ReportFailures(outcome);
+            var save = PendingSave.Of(record);
 
-                return outcome.Committed.Count > 0;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ranks: failed to save {SteamId}.", steamId);
-                return false;
-            }
-        }).ConfigureAwait(false);
-
-        if (ok) Settle(record, row, evictAfter);
-
-        return ok;
+            return Enqueue(() => WritePlayer(save));
+        }
     }
 
     /// <summary>Writes every dirty record. Coalesces — a concurrent call joins the pass in flight.</summary>
@@ -431,11 +427,11 @@ internal sealed class PlayerSessions
 
         lock (_saveGate)
         {
-            if (_inFlightSave is { IsCompleted: false } running) return running;
+            if (_pendingPass is { IsCompleted: false } pending) return pending;
 
-            _inFlightSave = RunSaveAllAsync();
+            _pendingPass = EnqueuePass(settle: true);
 
-            return _inFlightSave;
+            return _pendingPass;
         }
     }
 
@@ -454,64 +450,149 @@ internal sealed class PlayerSessions
             record.CreditPlaytime(now);
     }
 
-    private async Task<int> RunSaveAllAsync()
+    /// <summary>Snapshots every dirty record and queues one write of them.</summary>
+    /// <remarks>
+    /// Called under <see cref="_saveGate"/>. With nothing dirty nothing is queued: a record is clean only once a
+    /// write of its current values has committed, and every write queued before that one committed ahead of it.
+    /// </remarks>
+    private Task<int> EnqueuePass(bool settle)
     {
-        var pending = new List<(PlayerRecord Record, PlayerSnapshotRow Row)>();
+        var pending = _registry.All
+            .Where(record => record.Dirty)
+            .Select(PendingSave.Of)
+            .ToArray();
 
-        foreach (var record in _registry.All)
-            if (record.Dirty)
-                pending.Add((record, PlayerSnapshotRow.From(record)));
+        return pending.Length == 0 ? Task.FromResult(0) : Enqueue(() => WritePass(pending, settle));
+    }
 
-        if (pending.Count == 0) return 0;
+    /// <summary>Runs <paramref name="write"/> on the thread pool once every write queued before it has finished.</summary>
+    /// <remarks>
+    /// The one queue every player-row write goes through, called under <see cref="_saveGate"/> after the snapshot
+    /// (FR-API-09; implementation guide §4.7). Each write catches its own failure, and none breaks the chain for the
+    /// writes behind it.
+    /// </remarks>
+    private Task<T> Enqueue<T>(Func<T> write)
+    {
+        var queued = _saveTail.ContinueWith(_ => write(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        _saveTail = queued;
 
-        var rows = pending.Select(p => p.Row).ToArray();
+        return queued;
+    }
 
-        var outcome = await Task.Run(() =>
+    /// <summary>Writes one player's snapshot, then has the game thread settle it once it committed.</summary>
+    private bool WritePlayer(PendingSave save)
+    {
+        try
         {
-            try
-            {
-                var result = _store.Save(rows);
-                ReportFailures(result);
+            var outcome = _store.Save([save.Row]);
+            ReportFailures(outcome);
 
-                return result;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ranks: save pass failed for {Count} record(s); they stay dirty and retry.", rows.Length);
-                return new SaveOutcome([], []);
-            }
-        }).ConfigureAwait(false);
+            if (outcome.Committed.Count == 0) return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ranks: failed to save {SteamId}.", save.Row.SteamId);
+            return false;
+        }
+
+        SettleOnGameThread([save]);
+
+        return true;
+    }
+
+    /// <summary>Writes one batch pass and returns how many records committed.</summary>
+    /// <remarks>Those are settled on the game thread unless <paramref name="settle"/> is false, which only the unload pass asks for.</remarks>
+    private int WritePass(PendingSave[] pending, bool settle)
+    {
+        SaveOutcome outcome;
+
+        try
+        {
+            outcome = _store.Save(pending.Select(save => save.Row).ToArray());
+            ReportFailures(outcome);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ranks: save pass failed for {Count} record(s); they stay dirty and retry.", pending.Length);
+            return 0;
+        }
 
         var committed = outcome.Committed.ToHashSet();
 
-        foreach (var (record, row) in pending)
-            if (committed.Contains(record.SteamId))
-                Settle(record, row, evictAfter: false);
+        if (settle) SettleOnGameThread(Array.FindAll(pending, save => committed.Contains(save.Record.SteamId)));
 
         _detail.Write("Ranks: saved {Count} record(s).", committed.Count);
 
         return committed.Count;
     }
 
+    /// <summary>Settles committed writes on the next tick, where records, the registry and <c>PlayerDataSaved</c> belong.</summary>
     /// <remarks>
-    /// Clears the dirty flag only when nothing changed during the write. An award landing mid-save
-    /// must stay dirty, or an absolute writer would persist the pre-award value and then never
-    /// revisit it.
+    /// Fire-and-forget (FR-API-09; implementation guide §4.7). A tick still queued when the plugin unloads is
+    /// dropped with the registry it would have settled; posting one after that throws
+    /// <see cref="ObjectDisposedException"/>, which means the same.
     /// </remarks>
-    private void Settle(PlayerRecord record, PlayerSnapshotRow written, bool evictAfter)
+    private void SettleOnGameThread(PendingSave[] committed)
     {
-        if (PlayerSnapshotRow.From(record) == written) record.Dirty = false;
+        if (committed.Length == 0) return;
 
-        record.SettleArchives(written.Archives);
+        try
+        {
+            _core.Scheduler.NextTick(() => SettleAll(committed));
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void SettleAll(PendingSave[] committed)
+    {
+        foreach (var save in committed)
+            Settle(save);
+    }
+
+    /// <remarks>
+    /// Game thread only: it raises <c>PlayerDataSaved</c> and reads the player list. Clears the dirty
+    /// flag only when nothing changed since the snapshot. An award landing mid-save must stay dirty, or
+    /// an absolute writer would persist the pre-award value and then never revisit it.
+    /// <para>
+    /// Only the record's newest queued write clears the flag or drops the record. An older one can find the record
+    /// back on its own values after they moved and returned while the newer write waited; clearing there leaves the
+    /// row on the newer write's values, and nothing ever rewrites it. Its archives and <c>PlayerDataSaved</c> settle
+    /// either way.
+    /// </para>
+    /// <para>
+    /// A clean record no connected player holds is dropped, whichever write committed it — the disconnect save, a
+    /// module's save, or a pass. Kept, it waits for its player's return, who would then adopt it instead of their
+    /// row, and on a database other servers share that row may hold newer figures.
+    /// </para>
+    /// </remarks>
+    private void Settle(PendingSave save)
+    {
+        var record = save.Record;
+
+        if (record.IsLatestSave(save.Stamp) && PlayerSnapshotRow.From(record) == save.Row) record.Dirty = false;
+
+        record.SettleArchives(save.Row.Archives);
 
         _events.RaisePlayerDataSaved(Snapshot(record));
 
-        if (evictAfter && _registry.BySlot(SlotOf(record.SteamId)) is null && !record.Dirty)
-            _registry.Evict(record.SteamId);
+        if (!record.Dirty && record.IsLatestSave(save.Stamp) && !IsSeated(record)) _registry.Evict(record);
     }
 
-    private int SlotOf(ulong steamId) =>
-        _core.PlayerManager.GetPlayerFromSteamId(steamId, allowUnauthorized: true)?.Slot ?? -1;
+    /// <summary>Whether the record's player is connected and bound to it.</summary>
+    private bool IsSeated(PlayerRecord record) => _registry.BySlot(SlotOf(record.SteamId)) == record;
+
+    /// <summary>The slot of the connected player a record keyed on <paramref name="steamId"/> belongs to, or -1.</summary>
+    /// <remarks>Matched on <c>SteamID</c>, the id <see cref="Track"/> keyed the record on — under strict Steam authorization a client reads 0 there until Steam has confirmed it.</remarks>
+    private int SlotOf(ulong steamId)
+    {
+        foreach (var player in _core.PlayerManager.GetAllPlayers())
+            if (!player.IsFakeClient && player.SteamID == steamId)
+                return player.Slot;
+
+        return -1;
+    }
 
     private void ReportFailures(SaveOutcome outcome)
     {
@@ -521,8 +602,8 @@ internal sealed class PlayerSessions
 
     /// <summary>Runs the purge, then tells modules the window is open.</summary>
     /// <remarks>
-    /// <paramref name="force"/> is true only at cold start. A hot reload passes neither force nor
-    /// an empty server, which is the point — it is how an operator deploys a fix mid-session, so a
+    /// <paramref name="force"/> is true only at server start. A load into a running server passes neither force nor
+    /// an empty server, which is the point — a reload is how an operator deploys a fix mid-session, so a
     /// purge there would freeze a live server.
     /// </remarks>
     public async Task RunMaintenanceAsync(bool force)
@@ -573,19 +654,40 @@ internal sealed class PlayerSessions
     }
 
     /// <summary>Blocking final flush with a bounded budget, for <c>Unload</c>.</summary>
+    /// <remarks>
+    /// Queues a pass of its own rather than joining one in flight, which would miss whatever changed after that
+    /// pass was snapshotted, and waits for it behind every write queued before. It settles nothing: the registry
+    /// dies with this instance.
+    /// </remarks>
     public void FlushOnUnload(TimeSpan budget)
     {
         if (!SchemaUsable) return;
 
         try
         {
-            if (!SaveAllAsync().Wait(budget))
+            if (!QueueFinalPass().Wait(budget))
                 _logger.LogWarning("Ranks: final save did not finish within {Seconds}s; some records may be stale.", budget.TotalSeconds);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ranks: final save failed.");
         }
+    }
+
+    /// <summary>Banks playtime, then queues one unsettled pass of every dirty record.</summary>
+    private Task<int> QueueFinalPass()
+    {
+        BankPlaytime();
+
+        lock (_saveGate)
+            return EnqueuePass(settle: false);
+    }
+
+    /// <summary>A record, the snapshot a write of it carries and that write's stamp, kept together so the settle can compare them.</summary>
+    private readonly record struct PendingSave(PlayerRecord Record, PlayerSnapshotRow Row, long Stamp)
+    {
+        /// <summary>Snapshots <paramref name="record"/> and stamps the write about to carry it. Under <c>_saveGate</c> only.</summary>
+        public static PendingSave Of(PlayerRecord record) => new(record, PlayerSnapshotRow.From(record), record.StampSave());
     }
 
     public RanksPlayerSnapshot Snapshot(PlayerRecord record)

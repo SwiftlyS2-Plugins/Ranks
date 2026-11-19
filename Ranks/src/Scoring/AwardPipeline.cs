@@ -29,6 +29,13 @@ internal sealed class AwardPipeline
     private readonly ILogger _logger;
     private IRanksKillArbiter? _killArbiter;
 
+    private readonly Lock _claimGate = new();
+
+    /// <summary>Modules already told their claim was refused, so a claim every handshake repeats is reported once.</summary>
+    private readonly HashSet<string> _refusedClaims = new(StringComparer.OrdinalIgnoreCase);
+
+    private volatile string? _scoringOwner;
+
     /// <remarks>Only defeats a tick counter that froze or restarted; no single tick lasts this long.</remarks>
     private const long StaleGateMs = 1000;
 
@@ -56,8 +63,14 @@ internal sealed class AwardPipeline
         _logger = logger;
     }
 
-    /// <summary>Whether every gate is currently satisfied (FR-API-05).</summary>
-    public bool ArePointsEnabled => _config.Current.Rank.UseCoreRankingLogic && IsPlayCounted;
+    /// <summary>Whether core is scoring and every gate is currently satisfied (FR-API-05).</summary>
+    public bool ArePointsEnabled => CoreScores(_config.Current) && IsPlayCounted;
+
+    /// <summary>The module holding the scoring claim, or null while <c>UseCoreRankingLogic</c> alone decides (FR-API-14).</summary>
+    public string? ScoringOwner => _scoringOwner;
+
+    /// <summary>Whether core awards points of its own: the operator's switch, unless a module has claimed scoring (FR-PTS-00).</summary>
+    private bool CoreScores(RanksConfig config) => config.Rank.UseCoreRankingLogic && _scoringOwner is null;
 
     /// <summary>Whether play counts at all (FR-PTS-03): the server-wide half of every gate.</summary>
     /// <remarks>
@@ -92,11 +105,88 @@ internal sealed class AwardPipeline
     public bool ShouldRecordDeath(bool victimIsBot, bool attackerIsBot) =>
         IsPlayCounted && (_config.Current.Rank.BotsEnabled || !(victimIsBot || attackerIsBot));
 
+    /// <summary>Hands scoring to a module, so core awards none of its own points while it holds the claim (FR-API-14).</summary>
+    /// <returns>True when the module holds the claim, including when it already did.</returns>
+    /// <remarks>
+    /// Logs only when the holder changes, and a refusal — a blank id's included — once per claimant: the
+    /// handshake a module claims from re-runs on every plugin load and unload. Core keeps the id and nothing
+    /// the module supplied.
+    /// </remarks>
+    public bool ClaimScoring(string moduleId)
+    {
+        lock (_claimGate)
+        {
+            if (string.IsNullOrWhiteSpace(moduleId)) return RefuseBlank();
+            if (_scoringOwner is not { } holder) return Grant(moduleId);
+            if (IsHolder(moduleId)) return true;
+
+            Refuse(moduleId, holder);
+            return false;
+        }
+    }
+
+    /// <summary>Hands scoring back to the operator's switch. A no-op unless <paramref name="moduleId"/> holds the claim.</summary>
+    public void ReleaseScoring(string moduleId)
+    {
+        lock (_claimGate)
+        {
+            if (!IsHolder(moduleId)) return;
+
+            _scoringOwner = null;
+            _refusedClaims.Clear();
+            _detail.Write("Ranks: {Module} released scoring.", moduleId);
+        }
+    }
+
+    private bool IsHolder(string moduleId) =>
+        _scoringOwner is { } holder && string.Equals(holder, moduleId, StringComparison.OrdinalIgnoreCase);
+
+    /// <remarks>
+    /// Warns when the claim overrides the operator's switch — where a server that installed a rating
+    /// module without reading its setup ends up. Their file is never rewritten, so this is the one trace.
+    /// </remarks>
+    private bool Grant(string moduleId)
+    {
+        _scoringOwner = moduleId;
+        _refusedClaims.Clear();
+
+        if (_config.Current.Rank.UseCoreRankingLogic)
+            _logger.LogWarning(
+                "Ranks: {Module} has claimed scoring, so core awards no points of its own while it is loaded, " +
+                "even though Rank.UseCoreRankingLogic is true.",
+                moduleId);
+        else
+            _detail.Write("Ranks: {Module} has claimed scoring.", moduleId);
+
+        return true;
+    }
+
+    /// <remarks>An error rather than a warning: two absolute writers overwrite each other's points.</remarks>
+    private void Refuse(string claimant, string holder)
+    {
+        if (!_refusedClaims.Add(claimant)) return;
+
+        _logger.LogError(
+            "Ranks: {Claimant} tried to claim scoring, but {Holder} already holds it. Both write every player's " +
+            "points, so neither number means anything; remove one of them.",
+            claimant, holder);
+    }
+
+    /// <summary>Refuses a claim that names no module, reporting it once like any other refusal.</summary>
+    /// <remarks>Recorded in the refusal set as the empty id, which no named claimant can collide with.</remarks>
+    private bool RefuseBlank()
+    {
+        if (_refusedClaims.Add(string.Empty))
+            _logger.LogWarning("Ranks: ignoring a scoring claim with no module id.");
+
+        return false;
+    }
+
     /// <summary>Awards a configured event to a player, applying gates and multipliers.</summary>
     /// <remarks>
-    /// Returns silently when core's scoring is off: with core not awarding, its gates and
-    /// multipliers have nothing to act on, so they are inert rather than quietly running against
-    /// module writes (FR-PTS-00).
+    /// Returns silently when core's scoring is off, by the operator's switch or a module's claim: with
+    /// core not awarding, its gates and multipliers have nothing to act on, so they are inert rather
+    /// than quietly running against module writes (FR-PTS-00).
     /// </remarks>
     public void Award(
         PlayerRecord record,
@@ -108,7 +198,7 @@ internal sealed class AwardPipeline
     {
         var config = _config.Current;
 
-        if (!config.Rank.UseCoreRankingLogic) return;
+        if (!CoreScores(config)) return;
 
         // 1. Gates. A handler counting a fact checks IsPlayCounted before counting it (FR-PTS-03);
         //    these checks guard award-only events and every other caller.
@@ -156,7 +246,7 @@ internal sealed class AwardPipeline
     {
         var config = _config.Current;
 
-        if (!config.Rank.UseCoreRankingLogic) return;
+        if (!CoreScores(config)) return;
         if (!PassesGates(config, counterpartyIsBot)) return;
         if (claim.Points == 0) return;
 
@@ -210,19 +300,32 @@ internal sealed class AwardPipeline
 
     /// <summary>Replaces a player's total outright.</summary>
     /// <remarks>
-    /// Absolute, so exactly one authority may be active — core, or one rating module, never both.
-    /// Core cannot detect the combination without tracking who is scoring, so that stays an
-    /// operator constraint (FR-PTS-00).
+    /// Absolute, so exactly one authority may be active — core, or one rating module. A module's scoring
+    /// claim is what stops core's own awards (FR-API-14); this path is never gated by it, so admin commands
+    /// and every other plugin still write here (FR-PTS-00).
     /// </remarks>
     public void SetPoints(PlayerRecord record, int points, string reason)
     {
-        var floor = _config.Current.Rank.MinPoints;
-        var target = Math.Max(points, floor);
+        var target = Floored(points);
 
         if (target == record.Points) return;
 
         Apply(record, target - record.Points, reason, showMessage: false);
     }
+
+    /// <summary><see cref="SetPoints"/> for core's <c>!setpoints</c>, reported on <c>PointsChanged</c> even when the total already stood there.</summary>
+    /// <remarks>
+    /// With <c>Delta</c> 0 then. A rating module takes an admin's set into its rating from that event (FR-CMD-03), and
+    /// another plugin's points may have moved the total off the rating, so setting a player to the points they show
+    /// must still reach it. Only this command reports an unchanged total.
+    /// </remarks>
+    public void SetPointsAsAdmin(PlayerRecord record, int points, string reason)
+    {
+        if (Floored(points) != record.Points) SetPoints(record, points, reason);
+        else _events.RaisePointsChanged(new RanksPointsChangedArgs(record.SteamId, record.Points, record.Points, 0, reason));
+    }
+
+    private int Floored(int points) => Math.Max(points, _config.Current.Rank.MinPoints);
 
     private void Apply(PlayerRecord record, int delta, string reason, bool showMessage, ulong? counterparty = null, string? displayText = null)
     {

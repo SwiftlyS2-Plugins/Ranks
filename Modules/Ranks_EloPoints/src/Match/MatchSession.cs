@@ -14,11 +14,19 @@ internal sealed class MatchSession
 {
     public required ulong SteamId { get; init; }
 
-    /// <summary>The current period's rating: the module's table, else core's points, else StartPoints.</summary>
+    /// <summary>The current period's rating, carried across every match the player stays for.</summary>
+    /// <remarks>
+    /// Resolved from the module's table, else core's points, else StartPoints, then moved by each settle, admin
+    /// change and reset — so the next match is rated from the last result rather than from the rating at join.
+    /// </remarks>
     public double Rating;
 
-    /// <summary>False until the read lands — an unresolved player is left out of team averages.</summary>
+    /// <summary>False until a rating is known — the read, or core's points standing in for it. An unresolved player is left out of team averages.</summary>
     public bool RatingResolved;
+
+    /// <summary>True while <see cref="Rating"/> is core's rounded points standing in for a stored rating still being read, or read again after a failure.</summary>
+    /// <remarks>The read replaces it when it lands for the same generation; anything that sets the rating outright clears it.</remarks>
+    public bool RatingSeededFromCore;
 
     /// <summary>Bumped whenever the rating is seeded again, so a read begun before that cannot land on top of it.</summary>
     /// <remarks>A new period and a reset both re-seed; a read still in flight from before either holds the wiped rating.</remarks>
@@ -41,9 +49,9 @@ internal sealed class MatchSession
     public bool Present = true;
 }
 
-/// <summary>One player's settled rating, handed to the store.</summary>
+/// <summary>One player's rating for one period — settled at match end, or set by an admin — handed to the store.</summary>
 /// <remarks>
-/// <see cref="Period"/> is captured on the game thread at settle time and travels with the write, so
-/// a retry that lands after a rollover still goes to the period the match was played in (FR-DB-10).
+/// <see cref="Period"/> is captured on the game thread when the rating is settled or set, and travels with
+/// the write, so a retry that lands after a rollover still goes to the period it belongs to (FR-DB-10).
 /// </remarks>
 internal readonly record struct RatingWrite(ulong SteamId, long Period, double Rating, bool Abandoned);

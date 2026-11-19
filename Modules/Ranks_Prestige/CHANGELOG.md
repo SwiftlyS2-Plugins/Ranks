@@ -14,6 +14,17 @@ Notable changes to Ranks_Prestige, newest first.
 
      See .github/instructions/changelog.instructions.md for the full style. -->
 
+## [1.1.3] - 2026-11-18
+
+- Reloading Ranks on a running server no longer drops every player's prestige from the
+  scoreboard or removes the **Prestige** menu row.
+- A `config.jsonc` edit can no longer crash the server.
+- With Ranks 1.5.0, reloading the module can no longer crash the server.
+- A player leaving while a `config.jsonc` edit is being applied no longer leaves everyone
+  after them on their old prestige.
+- On a server without Ranks, a `config.jsonc` edit no longer logs
+  `CRITICAL: Unobserved task exception`.
+
 ## [1.1.2] - 2026-11-09
 
 - Added Ukrainian translations.

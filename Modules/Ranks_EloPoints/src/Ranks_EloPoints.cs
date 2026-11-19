@@ -14,7 +14,7 @@ namespace Ranks.EloPoints;
 
 [PluginMetadata(
     Id = "Ranks_EloPoints",
-    Version = "1.1.2",
+    Version = "1.2.0",
     Name = "Ranks EloPoints",
     Author = "Shmitzas",
     Description = "Faceit-style Elo rating for the Ranks plugin. Replaces core scoring.")]
@@ -28,6 +28,9 @@ public sealed class RanksEloPoints : BasePlugin
     private RanksBridge _bridge = null!;
     private EloPointsApi _api = null!;
     private bool _contractLoadFailed;
+
+    /// <summary>True from a load into a running server until Ranks is first bound and the players already here adopted.</summary>
+    private bool _adoptOnBind;
 
     private CancellationTokenSource? _endWatchdog;
 
@@ -58,10 +61,7 @@ public sealed class RanksEloPoints : BasePlugin
 
         StartEndWatchdog();
 
-        // A match in progress cannot be adopted: the per-round accrual it would need was never
-        // recorded, and reconstructing it from the scoreline would mean inventing the per-round
-        // expectations. It is discarded like a map change, reached a different way.
-        if (hotReload) AdoptConnectedPlayers();
+        _adoptOnBind = LoadsIntoRunningServer(hotReload);
     }
 
     /// <remarks>
@@ -100,8 +100,8 @@ public sealed class RanksEloPoints : BasePlugin
 
     /// <remarks>
     /// Absence is reported from here, not from the binder: the binder runs on every rebuild and
-    /// would spam, while this runs once per load cycle and is the only point where field state is
-    /// authoritative.
+    /// would spam, while this runs once, at server start, and is the only point where field state is
+    /// authoritative. A hot load or reload never reaches it.
     /// </remarks>
     public override void OnAllPluginsLoaded()
     {
@@ -227,25 +227,85 @@ public sealed class RanksEloPoints : BasePlugin
     /// <remarks>A match that never reaches a win panel pays nobody; nothing was written, so there is nothing to undo.</remarks>
     private void OnMapUnload(IOnMapUnloadEvent e) => _tracker.DiscardMatch("the map is changing");
 
-    private void AdoptConnectedPlayers()
+    /// <summary>Whether this load lands on a server already running, which <paramref name="hotReload"/> alone does not say.</summary>
+    /// <remarks>
+    /// SwiftlyS2's plugin API — <c>IPluginManager.LoadPlugin</c> and <c>ReloadPlugin</c> — passes it false on a running
+    /// server. Plugins load at server start before the first map, so a map being up is what tells the two apart.
+    /// </remarks>
+    private bool LoadsIntoRunningServer(bool hotReload) => hotReload || MapIsLoaded();
+
+    /// <summary>Whether the engine has a map up; false when that cannot be read.</summary>
+    /// <remarks><c>GlobalVars</c> throws until the first map, and unguarded in Load that throw aborts the load.</remarks>
+    private bool MapIsLoaded()
     {
-        foreach (var player in Core.PlayerManager.GetAllPlayers())
-            if (!player.IsFakeClient)
-                _tracker.Adopt(player);
+        try
+        {
+            return Core.Engine.GlobalVars.MaxClients > 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Runs once per load of Ranks: reports where the scoring claim stands, and adopts the players already here the first time.</summary>
+    private void OnRanksReady()
+    {
+        ReportScoringClaim();
+        AdoptConnectedPlayersOnce();
+    }
+
+    /// <summary>Adopts everyone already connected, the first time Ranks is bound after this module loaded into a running server.</summary>
+    /// <remarks>
+    /// Not from Load: a session needs Ranks, which no load path has bound by then. Once per load of this module, so a
+    /// Ranks reload replaying the ready check cannot void a match already being rated. A tick later, on the game
+    /// thread, because the handshake that raises this runs on a pool thread under SwiftlyS2's file watcher.
+    /// </remarks>
+    private void AdoptConnectedPlayersOnce()
+    {
+        if (!_adoptOnBind) return;
+
+        _adoptOnBind = false;
+        Core.Scheduler.NextTick(_tracker.AdoptConnectedPlayers);
     }
 
     /// <remarks>
-    /// Ungated by DetailedLogging: it fires once, and it is the only signal between a
-    /// misconfigured server and a ladder full of nonsense. It warns rather than overriding —
-    /// core's config belongs to the operator.
+    /// Ungated by DetailedLogging: it fires once per load of Ranks, and it is the only signal between a
+    /// misconfigured server and a ladder full of nonsense. Silent while this module holds the
+    /// scoring claim — core logs the switch it overrode itself.
     /// </remarks>
-    private void OnRanksReady()
+    private void ReportScoringClaim()
+    {
+        switch (_bridge.ScoringClaim)
+        {
+            case ScoringClaim.Refused:
+                ReportRefusedClaim();
+                break;
+            case ScoringClaim.Unsupported:
+                WarnIfCoreStillScores();
+                break;
+        }
+    }
+
+    /// <remarks>Here rather than at the claim, which every handshake repeats.</remarks>
+    private void ReportRefusedClaim() =>
+        _logger.LogError(
+            "Ranks_EloPoints: {Holder} already owns scoring, so both modules write every player's points and " +
+            "neither number means anything. Remove one of them.",
+            _bridge.ScoringHolder ?? "another module");
+
+    /// <remarks>
+    /// Only against a Ranks older than 1.5.0, which cannot hand scoring over. It warns rather than
+    /// overriding — core's config belongs to the operator.
+    /// </remarks>
+    private void WarnIfCoreStillScores()
     {
         if (_bridge.GetSettings() is not { UseCoreRankingLogic: true }) return;
 
         _logger.LogWarning(
             "Ranks_EloPoints: core's Rank.UseCoreRankingLogic is true, so core is still awarding points " +
             "per kill while this module writes a rating over the top. Neither number is meaningful. " +
-            "Set Rank.UseCoreRankingLogic to false in core's config.jsonc.");
+            "Set Rank.UseCoreRankingLogic to false in core's config.jsonc, or update Ranks to 1.5.0 or newer, " +
+            "which turns core's own scoring off by itself while this module runs.");
     }
 }

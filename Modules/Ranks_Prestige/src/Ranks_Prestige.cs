@@ -14,7 +14,7 @@ namespace Ranks.Prestige;
 
 [PluginMetadata(
     Id = "Ranks_Prestige",
-    Version = "1.1.2",
+    Version = "1.1.3",
     Name = "Ranks Prestige",
     Author = "Shmitzas",
     Description = "Virtual point deduction and prestige levels for the Ranks plugin.")]
@@ -101,7 +101,8 @@ public sealed class RanksPrestige : BasePlugin
 
     /// <remarks>
     /// Absence is reported from here, not from Acquire: the handshake re-runs on every plugin
-    /// load and unload, so warning there repeats once per rebuild.
+    /// load and unload, so warning there repeats once per rebuild. This runs once, at server start;
+    /// a hot load or reload never reaches it.
     /// </remarks>
     public override void OnAllPluginsLoaded()
     {

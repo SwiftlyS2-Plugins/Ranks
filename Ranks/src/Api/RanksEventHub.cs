@@ -117,7 +117,12 @@ internal sealed class RanksEventHub
         }
     }
 
-    /// <remarks>Cleared on unload, or handlers accumulate across the handshake rebuild (FR-API-04).</remarks>
+    /// <summary>Drops every subscriber, for Unload.</summary>
+    /// <remarks>
+    /// So the instance a module still holds until its next handshake keeps none of its handlers, and nothing core
+    /// still has in flight can reach one. Duplicates are not the reason: the handshake rebuild never unloads core, and
+    /// <c>RanksModuleBase.Register</c>'s guard is what stops a module subscribing twice (FR-API-10).
+    /// </remarks>
     public void Clear()
     {
         PlayerDataLoaded = null;

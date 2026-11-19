@@ -212,7 +212,9 @@ internal sealed class CommandRegistry
 
     /// <remarks>
     /// <c>Args</c> excludes the command name. The amount is the last argument and the target is
-    /// everything before it, so an unquoted name containing a space still resolves.
+    /// everything before it, so an unquoted name containing a space still resolves. The reasons —
+    /// <c>admin.set</c>, <c>admin.add</c>, <c>admin.subtract</c> — are what Ranks_EloPoints keys on to
+    /// take an admin's change into its rating, so renaming one silently undoes every such change.
     /// </remarks>
     private void AdjustPoints(ICommandContext ctx, AdjustMode mode)
     {
@@ -234,7 +236,7 @@ internal sealed class CommandRegistry
 
         foreach (var record in TargetRecords(ctx, ctx.Args[..^1]))
         {
-            if (mode == AdjustMode.Set) _api.SetPoints(record.SteamId, amount, reason);
+            if (mode == AdjustMode.Set) _api.SetPointsAsAdmin(record.SteamId, amount, reason);
             else _api.AddPoints(record.SteamId, mode == AdjustMode.Add ? amount : -amount, reason, showMessage: false);
 
             ctx.Reply(_core.Localizer["admin.adjusted", record.Name, record.Points]);

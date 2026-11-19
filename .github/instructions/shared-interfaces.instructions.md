@@ -13,11 +13,11 @@ breaking change to it as a breaking change to every module in the ecosystem.
 > **The dependency runs one way.** Core never calls module code, never holds a
 > module-supplied delegate, and never gains config keys because a module was
 > installed. The contract therefore exposes **facts and operations only** — read
-> a record, change points, persist, observe, read core's own settings, and read
-> what its ladder and scoreboard display, so another plugin can draw the same
-> page (FR-API-12). If a new method would have core invoking something a module
-> supplied, it belongs on the module's side of the line instead. See the
-> requirements doc, FR-PTS-01.
+> a record, change points, persist, observe, read core's own settings, hand
+> scoring to one rating module by id (FR-API-14), and read what its ladder and
+> scoreboard display, so another plugin can draw the same page (FR-API-12). If a
+> new method would have core invoking something a module supplied, it belongs on
+> the module's side of the line instead. See the requirements doc, FR-PTS-01.
 
 ### Contract project
 
@@ -76,13 +76,16 @@ Three consequences:
    > with `_vipApi.PlayerLoaded += …` / `OnPlayerSpawn += …`. The
    > `RegisterFeature` call itself is idempotent — core overwrites
    > `_features[key]` — but the `+=` lines are not, and they are only removed in
-   > `Unload`. Do not copy that shape: subscribe in `Load`, or guard with a flag
-   > that the handshake does **not** reset.
+   > `Unload`. Do not copy that shape. A module has no shared interface in
+   > `Load`, so it subscribes to the interface's events from the handshake,
+   > through `RanksModuleBase.Register`, whose guard the handshake never resets;
+   > game-event hooks, which need no interface, still go in `Load`.
 2. **Binders must be fail-closed**, never early-return — an early return leaves
    a stale reference pointing at a disposed provider.
 3. **Never log from a binder.** It runs per rebuild and will spam. Report
-   absence from `OnAllPluginsLoaded`, which runs once per load cycle and is the
-   only place where field state is authoritative.
+   absence from `OnAllPluginsLoaded`, which runs once, at server start — a hot
+   load or reload never reaches it — and is the only place where field state is
+   authoritative.
 
 ### Consuming (module side)
 

@@ -89,6 +89,7 @@ public sealed record RanksLeaderboardEntry(
     string RankTag);
 
 /// <summary>Raised after a point change has been applied.</summary>
+/// <remarks><c>Delta</c> is 0 only when core's <c>!setpoints</c> named the total the player already had (<c>IRanksApi.PointsChanged</c>).</remarks>
 public sealed record RanksPointsChangedArgs(
     ulong SteamId,
     int OldPoints,
@@ -134,9 +135,9 @@ public sealed class RanksPointsChangingArgs
 
 /// <summary>A snapshot of every point-related setting the operator configured.</summary>
 /// <remarks>
-/// Readable in both modes — with <c>UseCoreRankingLogic</c> off core applies none of these itself,
-/// so a rating module reads them as the operator's intent rather than as core's behaviour
-/// (FR-API-05).
+/// Readable in both modes — with <c>UseCoreRankingLogic</c> off, or a module holding the scoring
+/// claim, core applies none of these itself, so a rating module reads them as the operator's intent
+/// rather than as core's behaviour (FR-API-05).
 /// </remarks>
 public sealed record RanksPointSettings(
     bool UseCoreRankingLogic,

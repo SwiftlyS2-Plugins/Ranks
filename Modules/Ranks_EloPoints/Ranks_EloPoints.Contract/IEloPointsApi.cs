@@ -28,10 +28,11 @@ public sealed record EloMatchResult(
 /// registry and therefore no version negotiation, so a renamed or re-signed member is a
 /// <c>MissingMethodException</c> at call time rather than a build error anyone sees.
 ///
-/// Unlike WeaponStats there is no unflushed-delta problem to solve: a rating is written once, at
-/// match end, so the stored value is always current. A match in progress is deliberately not
-/// visible here — it has no result until it ends, and exposing a provisional one would invite
-/// callers to treat it as settled.
+/// Unlike WeaponStats there is no unflushed-delta problem to solve: a rating is written at match
+/// end and when an admin's point command changes it, so the stored value is always current. A
+/// standing still needs a rated match completed in its period, which no admin command counts. A
+/// match in progress is deliberately not visible here — it has no result until it ends, and
+/// exposing a provisional one would invite callers to treat it as settled.
 ///
 /// Ratings follow Ranks' periods (seasons): each period starts everyone unrated, and a closed one
 /// keeps its final ratings. A period id is Ranks' own — <c>IRanksApi.CurrentPeriod</c> and
@@ -54,7 +55,7 @@ public interface IEloPointsApi
     /// <summary>A player's standing in the current period, or null when they have not completed a rated match in it.</summary>
     Task<EloStanding?> GetStandingAsync(ulong steamId);
 
-    /// <summary>A player's standing in one period — their final one for a closed period — or null when they hold none there.</summary>
+    /// <summary>A player's standing in one period — their final one for a closed period — or null when they completed no rated match there.</summary>
     Task<EloStanding?> GetStandingAsync(ulong steamId, long period);
 
     /// <summary>The current period's highest-rated players, descending.</summary>

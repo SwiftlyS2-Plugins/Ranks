@@ -168,6 +168,16 @@ A matched combo pays **on top of** core's flat catalogue: a no-scope headshot sc
 `kill + headshot + noscope + combo.noscope_hs`. The configured number is a
 bonus, not a total — an operator prices a combo knowing the components have already paid.
 
+It pays only while core scores. A claim is awarded through core's own pipeline (§5), so
+beside a rating module that holds core's scoring claim (FR-API-14) a combo is counted and
+pays nothing; the module logs that once at startup, from `OnAllPluginsLoaded` — or, after a
+load of this module into a running server, which never reaches it, a few seconds after `Load` — because the
+rating module claims from its own handshake, which may run after this one. A load that found
+no map but still has no `OnAllPluginsLoaded` at its first tick — a plugin-API load landing
+between maps — schedules that delayed check then. SwiftlyS2 itself loading mid-game finds a
+map up and still raises `OnAllPluginsLoaded`, which cancels the delayed check, so the warning
+appears once.
+
 ### 4.2 Suppression
 
 One global switch:
@@ -245,8 +255,7 @@ this shape rather than a plain `AddPoints` call:
 The last two are why the module must not print its own chat line: it would spam players who
 switched point messages off, and bypass round-end batching.
 
-One arbiter at a time, the same operator constraint as the absolute rating module
-(FR-PTS-00).
+One arbiter at a time; a second registration replaces the first (FR-API-11).
 
 ### 5.1 Why the reason is not the message
 
@@ -312,7 +321,8 @@ these counts are keyed by SteamID in a plain map and simply wait for the next ti
 timer.
 
 **A combo counts whenever core consults the arbiter, whether or not points follow** — with
-`UseCoreRankingLogic` off, or a subscriber cancelling the award, the count still moves.
+core's scoring off, by `UseCoreRankingLogic` or a rating module's claim, or a subscriber
+cancelling the award, the count still moves.
 Core consults it only for a death it counts (FR-PTS-03): below `MinPlayers`, during a
 warmup `WarmupPoints` excludes, or with `BotsEnabled` off when a bot is involved or a team
 is made up only of bots, there is nothing to count. The arbiter also asks core's play gate
@@ -375,15 +385,25 @@ A write already under way must not bring back what the reset removed. Every data
 flush, reset, purge, reconcile — runs through one queue in the writer, in the order the game
 thread issued it, so the reset lands after every flush cut before it. The player's unflushed
 counts are dropped on the game thread, and retry entries the reset covers are dropped inside the
-queue.
+queue. A reset that fails waits in the retry buffer where it was queued and is applied again with
+the next write, still ahead of every count drained after it — so it takes away only what the
+player held before the reset. One whose own statements fail three times — no `DELETE`
+permission, say — is dropped with an error in the log, so the writes behind it are not held
+back. Connection failures, deadlocks, lock waits and timeouts the driver marks transient never
+count, and neither does anything thrown outside the reset's own statements.
 
 **Purge** (`PlayersPurged`, FR-DB-08). Both tables lose every row of each purged player, and the
-retry buffer drops theirs. Before 1.1.0 this module did not sweep at all.
+retry buffer drops theirs; a purge that fails is retried, and given up on, like a reset. It
+deletes from `ranks_combos_period` even with periods off, so a missing one fails every purge.
+Before 1.1.0 this module did not sweep at all.
 
 **Orphan reconcile.** `PlayersPurged` is a live event, so a purge that runs while this module is
-not loaded is never seen. On a cold start, once core is ready, both tables lose every row whose
-`steam_id` is not in core's `ranks_players` — the same pass `Ranks_WeaponStats` runs, and skipped
-on hot reload for the same reason (FR-DB-09).
+not loaded is never seen. Once per load of the module, both tables lose every row whose
+`steam_id` is not in core's `ranks_players` — the same pass `Ranks_WeaponStats` runs. It runs
+from core's `MaintenanceDue`, which core raises after the pass a server start forces and
+otherwise only on an empty server (FR-DB-09), so it never runs with players connected: at a
+start it follows startup, and a module bound to Ranks only on a running server waits for the
+next quiet window — at core's default `Database.MaintenanceIntervalHours` of 0, the next start.
 
 ---
 
@@ -469,6 +489,8 @@ weapon or placement** and spread over a round. Core's streaks are weapon-agnosti
 
 **Anything spanning more than one tick.** No "plant and defuse the same round".
 
-**Guard against double scoring.** Running this with `SuppressCoreAwards` alongside an
-absolute rating module such as `Ranks_EloPoints` means two authorities deciding the same
-number. The module does not detect it; the README carries the warning.
+**Pay beside a rating module.** A rating module such as `Ranks_EloPoints` claims scoring
+(FR-API-14) and owns every player's points, so core pays no combo claim while it runs — with
+or without `SuppressCoreAwards`, which has nothing left to suppress. Combos are still counted,
+and the module warns once at startup. Against a Ranks older than the claim, the operator's
+`UseCoreRankingLogic = false` has the same effect.

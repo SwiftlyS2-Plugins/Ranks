@@ -134,12 +134,13 @@ so the module behaves exactly as 1.0.1 did. Checked against the 1.0.4 contract:
 |---|---|
 | Constructor | nothing |
 | `Load` | config, `Core.Registrator.Register(_tracker)`, core-event subscriptions |
-| `UseSharedInterface` / `OnSharedInterfaceInjected` | acquire through the bridge; `RegisterMigrations(assembly)` |
-| `OnCoreReady` | resolve both table names, read core's settings, run the `UseCoreRankingLogic` check |
+| `UseSharedInterface` / `OnSharedInterfaceInjected` | acquire through the bridge; claim scoring (§2.4); `RegisterMigrations(assembly)` |
+| `OnCoreReady` | resolve both table names; report a refused claim, or — against a Ranks older than 1.5.0 — run the `UseCoreRankingLogic` check (§2.4); after a load into a running server, adopt the players already connected, once (§2.5) |
+| `OnPointsChanged` | take an admin's change into the rating (§8.4) |
 | `OnPeriodChanged` | drop the rating cache, leave a match the boundary cut through unrated, re-seed every session (§8.2) |
 | `OnPlayerReset` | queue the player's rating delete, re-seed their session (§8.3) |
 | `OnAllPluginsLoaded` | if `Ranks` is absent, log one ungated warning and stay idle |
-| `Unload` | discard any open match, then unwire |
+| `Unload` | discard any open match, release the claim, then unwire |
 
 `RegisterMigrations` goes in the handshake, not `Load` — there is no API in
 `Load` (guide §10.5). Core dedupes on `(assembly, pluginId)`, so the handshake
@@ -192,35 +193,85 @@ Two further rules follow from the same hazard:
   tick, which lands inside CS2's map-load shuffle — and that callback reads game
   state.
 
-### 2.4 The `UseCoreRankingLogic` check
+### 2.4 Claiming scoring
+
+The module takes scoring from core (FR-API-14) rather than asking the operator to
+switch it off, so an install that never touched `Rank.UseCoreRankingLogic` still
+gets exactly one authority:
 
 ```csharp
-protected override void OnCoreReady()
+[MethodImpl(MethodImplOptions.NoInlining)]
+private void Attach(IRanksApi api)
 {
-    if (_bridge.GetSettings() is { UseCoreRankingLogic: true })
-        _logger.LogWarning(
-            "Ranks_EloPoints: core's Rank.UseCoreRankingLogic is true, so core is still awarding " +
-            "points per kill while this module writes a rating over the top. Neither number is " +
-            "meaningful. Set Rank.UseCoreRankingLogic to false in core's config.jsonc.");
+    ClaimScoring();                 // first, so OnCoreReady (raised inside Register) knows the outcome
+
+    var module = ModuleFor(api);    // the module built for this API, rebuilt after a core reload
+
+    module.Register();
+    module.HandOverMigrations(typeof(RanksBridge).Assembly);
 }
 ```
 
-Ungated by `DetailedLogging` — it fires once, and it is the only signal between
-a misconfigured server and a ladder full of nonsense. It **warns rather than
-overriding**: core's config belongs to the operator, and silently flipping it
-would be the worse surprise. Same call `Ranks_WeaponStats` makes on its FFA
-mismatch.
+- **Every handshake claims again.** The claim is idempotent, and a core reload
+  builds an API that holds none. It goes through `_api`, the interface this
+  handshake bound — never the module's `Api`, which still points at the unloaded
+  core until `ModuleFor` rebuilds the module.
+- **A core reload rebuilds the module.** `ModuleFor` keeps the module while the
+  handshake hands over the instance it was built for. Handed another one, it
+  unregisters the old module inside a `try`/`catch` — that core is gone — and
+  builds a new one, whose `Register` subscribes to the new core and replays
+  `OnCoreReady`. The tracker and the store live in the plugin, so no session or
+  rating is lost.
+- **Against a Ranks older than 1.5.0** the claim is a `MissingMethodException` from
+  its own `NoInlining` helper, caught in `ClaimScoring`; the state becomes
+  `Unsupported` and stays so, since the contract cannot change without a restart.
+- **`Unload` releases it**, from a separate `NoInlining` helper reached only after a
+  granted claim — inline, an old contract would fail `Unwire` at JIT before the
+  `Unregister` that follows.
+- **Logging is once per core instance**, from `OnCoreReady`, never from the claim:
 
-### 2.5 Hot reload
+| Claim | Logged by the module |
+|---|---|
+| held | nothing — core logs the claim itself when it overrides `UseCoreRankingLogic = true` |
+| refused | one `Error` naming the module that holds it |
+| unsupported | the old check: one `Warning` when `UseCoreRankingLogic` is `true`, adding that Ranks 1.5.0 turns core's scoring off by itself |
 
-`Load(hotReload: true)` runs mid-match with players connected. **Any match in
-progress is abandoned, not adopted** — the per-round accrual it would need was
-never recorded, and reconstructing it from the scoreline would mean inventing
-the per-round expectations. A fresh match session starts at the next round, and
-the partial one pays nobody.
+All ungated by `DetailedLogging` — each fires once, and is the only signal between
+a misconfigured server and a ladder full of nonsense. Against an old Ranks the
+module still warns rather than overriding: that core has no claim to take, and
+its config belongs to the operator.
+
+### 2.5 Loading into a running server
+
+A reload — `sw plugins reload`, the file watcher, or SwiftlyS2's plugin API, which
+passes `hotReload: false`, so the module decides "running server" as
+`hotReload` or a map being up — finds players connected and, often, a match under
+way. `Load` cannot adopt them: a session needs Ranks, and no load path has bound
+it yet. So `Load` only sets a flag, and the first `OnCoreReady` after it posts
+`MatchTracker.AdoptConnectedPlayers` to the next tick — on the game thread, since
+the file watcher runs that handshake on a pool thread:
+
+- **Everyone connected gets a session**, resolved like a joiner's (§4.3). Core
+  already holds their records, so an empty read seeds from core's points at once,
+  and their match-start counters are read from core there and then: their
+  `PlayerDataLoaded` fired before the module bound, and a session without counters
+  scores at the median (§7.2) — every adopted player would then miss the
+  performance bonus, and a later joiner be ranked against them. A record core is
+  still loading fills both from its `PlayerDataLoaded` instead.
+- **A match past its first round stays unrated.** Its earlier rounds were never
+  accrued, and reconstructing them from the scoreline would mean inventing the
+  per-round expectations. The match is voided like one a season boundary cuts
+  through (§8.2), with the round count taken as the restart baseline so an
+  `mp_restartgame` straight after still starts a rated match. The next match is
+  rated normally.
+- **Once per load of this module.** A Ranks reload replays `OnCoreReady` on the
+  rebuilt module (§2.4); adopting again there would void the match the module is
+  already rating.
 
 That is the same rule as a map change (features.md §2.1), reached a different
-way.
+way. A plugin-API load landing between maps may find no map and adopt nobody on
+bind; nothing is lost, since the players are put in server again as that map loads
+and the match there is new.
 
 ---
 
@@ -354,10 +405,10 @@ This module reads the current rating, computes a new one, and writes it.
 ```sql
 -- MySQL / MariaDB
 INSERT INTO {t} (steam_id, period, rating, matches, abandons, updated_at)
-VALUES (@steam_id, @period, @rating, 1, @abandons, @updated_at)
+VALUES (@steam_id, @period, @rating, @matches, @abandons, @updated_at)
 ON DUPLICATE KEY UPDATE
     rating = VALUES(rating),
-    matches = matches + 1,
+    matches = matches + VALUES(matches),
     abandons = abandons + VALUES(abandons),
     updated_at = VALUES(updated_at);
 
@@ -365,19 +416,22 @@ ON DUPLICATE KEY UPDATE
 INSERT INTO {t} (...) VALUES (...)
 ON CONFLICT (steam_id) DO UPDATE SET
     rating = EXCLUDED.rating,
-    matches = {t}.matches + 1,
+    matches = {t}.matches + EXCLUDED.matches,
     abandons = {t}.abandons + EXCLUDED.abandons,
     updated_at = EXCLUDED.updated_at;
 ```
 
-`rating` is replaced; the two counters accumulate. Keep `VALUES()` on the MySQL
-branch — 8.0.20 deprecates it for the `AS new` alias, which MariaDB does not
-support at all. The update leaves `period` alone: by the time it runs, the only
-row it can hit already holds the write's period.
+`rating` is replaced; the two counters accumulate. A settle passes `@matches = 1`
+and `@abandons` from the result; an admin's adjustment (§8.4) passes `0` for both,
+so it moves the rating without counting a match, and a row it creates starts on 0
+of each. Keep `VALUES()` on the MySQL branch — 8.0.20 deprecates it for the
+`AS new` alias, which MariaDB does not support at all. The update leaves `period`
+alone: by the time it runs, the only row it can hit already holds the write's
+period.
 
-**Every write carries the period it was settled in**, captured on the game thread
-at settle time, and lands in that period however late the store gets to it. Per
-write, inside the batch's transaction:
+**Every write carries the period it was settled or adjusted in**, captured on the
+game thread at that moment, and lands in that period however late the store gets
+to it. Per write, inside the batch's transaction:
 
 1. `SELECT period, rating FROM {t} WHERE steam_id = @steam_id`.
 2. A row on an older period is closed first (§4.3).
@@ -434,19 +488,72 @@ ahead of `Rating`. It also checks the session's `RatingGeneration`: a new period
 or a reset re-seeds the session and bumps it, so a read begun before either is
 discarded rather than landing the wiped rating on top of the new seed.
 
+**Core's points can arrive first.** `PlayerDataLoaded` can land before the
+read, and seeds an unresolved session from core's points — `StartPoints` when
+those are 0 — so the player counts in team averages at once. That seed is only a
+stand-in, marked `RatingSeededFromCore`: the points are rounded, and may hold
+points another plugin gave, which the next settle would carry into the rating. A
+stored rating read for the same generation replaces it; a rating a settle, an
+admin's change or a reset has set since is never replaced. Finding no row leaves
+the seed, which is what step 2 above would choose anyway.
+
+**The read can arrive first, too.** A read finding no row resolves the session
+from step 2 or 3 only once core holds the player's record — the bridge's
+`IsLoaded`. Before that, core's `GetPoints` answers 0 for a player it has not
+loaded, and resolving there would start someone moving over from core scoring at
+`StartPoints`, their points lost; the session waits for `PlayerDataLoaded` to seed
+it instead. A player whose core record never loads stays unrated (§7.3).
+
+**A read can fail, too.** The store reports a failure apart from finding no row:
+taken for none, it would start a player who holds a rating from core's rounded
+points for good, and their next match end would write that over the rating the read
+never reached. So the tracker logs the player's first failure at `Error`, stands
+core's points in exactly as `PlayerDataLoaded` would — marked `RatingSeededFromCore`,
+and only once core holds the record — and retries the read three times, 5, 15 and
+then 45 seconds apart. Each retry runs only for the same `RatingGeneration` and only
+while a stored rating would still be taken, so a settle, an admin's change, a reset
+or a new period ends them; one that lands replaces the stand-in. A retry that fails
+again is logged only with `DetailedLogging`.
+
+**`PlayerDataLoaded` also starts sessions.** Steam can authorize a player after
+they are put in server, and `Adopt` skips a SteamID of 0, which is what an
+unauthorized player reads under strict authorization. Core's own load waits for
+the authorization, so when `PlayerDataLoaded` names a player with no session, the
+tracker finds them connected and authorized and adopts them there. The same
+picks up a player who entered while Ranks was not bound, which `Adopt` also
+skips: a Ranks loaded or reloaded on a running server loads everyone connected.
+Mid-match, either counts as having joined late.
+
 ### 4.4 The queue, and failure handling
 
 **Every database operation the store makes runs on one queue**, in the order the
-game thread asked for it: settles, resets, purges and reads alike. That is the
-whole of the ordering argument — a reset always lands after the settle before it
-and before the settle after it, and a read can never close a player's row while a
-write for that player is still in flight.
+game thread asked for it: settles, admin adjustments, resets, purges and reads
+alike. That is the whole of the ordering argument — a reset always lands after the
+settle before it and before the settle after it, and a read can never close a
+player's row while a write for that player is still in flight.
 
 A failed write must not lose the rating. A failed batch stays at the head of the
 queue's retry list and is applied again, ahead of the next change and in the
 same transaction, never reordered — so a reset still lands between the two
 settles it came between. It never merges back into a live session; those belong
 to the game thread (§6).
+
+A reset or purge the database can never apply — no `DELETE` permission, say —
+would hold every later rating back for the rest of the load. So a failure is
+charged to the change whose own statement threw, and a reset or purge charged
+three times is dropped, logged at `Error` once, and the list behind it written
+straight away. Two kinds of failure are charged to nobody: one the driver marks
+transient (`DbException.IsTransient`, on the exception or any it wraps), and
+anything thrown outside the change's own statements — opening, beginning or
+committing the transaction, or another change. So connection failures,
+deadlocks, lock waits and timeouts the driver marks transient never drop one.
+That matters on PostgreSQL in particular: Npgsql sends `BEGIN` with the first
+statement, so a pooled connection that died idle fails at the change's own
+statement. Drivers differ in what they mark: Npgsql marks lost connections,
+deadlocks, and lock and command timeouts; MySqlConnector marks deadlocks and
+InnoDB lock-wait timeouts, but not a connection lost mid-statement or its own
+command timeout; System.Data.SQLite marks nothing. A rating is never given up on:
+it is kept until it is written.
 
 Log at `Error` with the exception object. This is a data-loss path and is not
 gated behind `DetailedLogging`.
@@ -557,8 +664,9 @@ rather than once per bullet.
 internal sealed class MatchSession
 {
     public required ulong SteamId { get; init; }
-    public double Rating;            // resolved per §4.3, for the current period
+    public double Rating;            // resolved per §4.3, then moved by every settle (§7.3)
     public bool RatingResolved;
+    public bool RatingSeededFromCore;  // Rating is core's points standing in until the read lands (§4.3)
     public int RatingGeneration;     // bumped on every re-seed, so a stale read is discarded
     public int RoundsPresent;
     public double SumActual;         // Σ S_r
@@ -576,7 +684,8 @@ session in place rather than clearing the dictionary — see §6.3.
 
 **Clearing `_sessions` at a match boundary is wrong, and it looks right.**
 Nothing re-adds a session for an already-connected player: `Adopt` runs on
-connect and on hot reload only. So wiping the dictionary after a knife-round
+connect, when core loads a player's record, and once after a load into a running
+server. So wiping the dictionary after a knife-round
 restart, or after any settle, leaves every connected player sessionless, and the
 entire following match accrues nothing and settles nobody.
 
@@ -584,7 +693,8 @@ entire following match accrues nothing and settles nobody.
 
 - drops the ones marked absent (they have just been settled or have left);
 - zeroes `RoundsPresent`, `SumActual`, `SumExpected`, `LastTeam`;
-- keeps `Rating` / `RatingResolved`, so no database re-read is needed;
+- keeps `Rating` / `RatingResolved` — after a settle, `Rating` is the rating
+  that match settled at (§7.3) — so no database re-read is needed;
 - **re-captures `StartCounters`.**
 
 That last point is a second bug in the same place. `StartCounters` is a *match*
@@ -728,11 +838,21 @@ _bridge.SavePlayer(steamId);
 writes.Add(new RatingWrite(steamId, period, updated, abandoned));
 // ...
 _ = _store.CommitAsync(writes);     // off-thread from here on
+CarryRatingsForward(rated, writes); // every rated session now holds its settled rating
 StartFreshMatch();
 ```
 
 `SetPoints` has to be inline because core's API is game-thread state; the DB
 write must not be, because a synchronous write at match end is a stall.
+
+**Every rated session moves to its settled rating, after the loop.** A session
+outlives the match for a player who stays — `StartFreshMatch` keeps it, and a
+map change's reconnect resumes it — so the next match is rated from this one's
+result. Left alone, a player who stayed was rated from the rating they joined
+with every match, and each settle overwrote the last. Never inside the loop:
+`Classic` scores every player against `TeamAverages`, which reads every
+session's rating, so moving one mid-loop would rate the players after it
+against teammates already moved.
 
 **Only a session whose rating resolved is settled.** One that never resolved
 holds either nothing — a read that did not land in a whole match — or, after a
@@ -754,6 +874,10 @@ if (_bridge.CurrentPeriod() is { } period
     && (int)Math.Round(rating) != player.Points)
     Api.SetPoints(player.SteamId, (int)Math.Round(rating), "elopoints.resync");
 ```
+
+The resync is also what overwrites every point change the module does not adopt.
+An admin's change is the one it does: it reaches the cache before the player's next
+join, so the resync finds the two in agreement (§8.4).
 
 `SavePlayerAsync` is called explicitly rather than waiting for core's periodic
 pass, per FR-MOD-05 rule 5 — the record is evicted once saved, and the next pass
@@ -778,6 +902,15 @@ not expect to look the player up. The purge deletes from **both** tables — a
 purged player loses their history too, as in core (FR-DB-10) — and drops
 anything of theirs still waiting in the retry list, which would otherwise
 re-create a row for a player core no longer has.
+
+The purge is a queued change like any other (§4.4), and one that fails is kept
+rather than dropped: this module has no orphan sweep, so nothing else would ever
+remove those rows. It stays in the retry list ahead of everything queued after
+it, so a rating written for one of those players since lands on the cleared rows
+instead of being deleted with them, and while it waits, a read for one of them
+answers none rather than their old rating. Dropped after the third failure of its
+own statements the driver does not mark transient (§4.4), it leaves those rows,
+and a returning player reads their old rating again.
 
 ### 8.2 A new period
 
@@ -829,6 +962,49 @@ they reconnected. Its accrued rounds go because they were measured against the
 rating the reset wiped; the player is rated on the rest of the match as if they had
 joined at that moment, which participation and shrinkage already handle.
 
+### 8.4 An admin's change
+
+`OnPointsChanged` adopts exactly three reasons, the ones core's admin commands
+write (FR-CMD-03): `admin.set`, `admin.add`, `admin.subtract`. Everything else —
+the module's own `elopoints.*` writes, another plugin's `AddPoints` or `SetPoints`
+— is left alone, and the next resync or settle writes the rating back over it.
+`MatchTracker.AdoptAdminChange`, on the game thread:
+
+1. **works out the rating.** `admin.set` takes `NewPoints`. A give or a take adds
+   `Delta` — what core applied after its `MinPoints` floor — to the rating the
+   module knows for the current period: the store's cache first, which every read,
+   settle and adjustment updates, else a resolved session's, else core's
+   `OldPoints`. That last is a trade-off: while the rating is unresolved, a give or
+   a take lands on top of core's points rather than the stored rating, so a
+   non-admin change already in them can stick. The result floors at `MinPoints`,
+   so a fractional rating cannot go below it where core's points did not;
+2. **caches and queues it** with `RatingStore.AdjustAsync`: cached at once, so the
+   resync on the next join agrees and a read already in flight cannot replace it
+   (`Remember` keeps a same-period entry); written on the one queue (§4.4) with the
+   period captured here, through the same period rules as a settle (§4.2), but
+   adding 0 to `matches` and `abandons`;
+3. **re-seats the session**, if the player has one: `Rating` set, `RatingResolved`
+   true and `RatingGeneration` bumped, so a read begun before the change is
+   discarded (§4.3). The rounds already accrued stay — the admin changed the rating
+   the match settles from, not the match.
+
+Without this, the change lasted only until the rating was next written: the
+resync on the player's next join pushed the cached rating straight back over it,
+which is how a `!setpoints` to 1000 came back as 54 after a map change.
+
+Core reports `!setpoints` even to the total the player already has, with `Delta`
+0 (FR-CMD-03), and `admin.set` takes `NewPoints` either way. So setting a player to
+the points they show sets the rating too — the case that matters once another
+plugin's points have moved the total off the rating.
+
+**The published API does not count the change as a standing.** A row the write
+created holds `matches = 0` until its player completes a rated match in that
+period, and `IEloPointsApi` promises a standing only after one. So every
+`EloPointsApi` read filters on `matches > 0` — the current period's and a closed
+period's, history included, since a rollover archives such a row like any other.
+The module's own reads are unfiltered: the resync and the session seed take the
+adjusted rating.
+
 ---
 
 ## 9. Rating invariants
@@ -864,5 +1040,3 @@ whenever `EloMath` changes.
 | Performance coefficients (§7.2) | no | starting values; expected to move on real data |
 | Placement matches | no | deliberately out of scope (features.md §6) |
 | `Abandon.Penalty` does not deter abandonment in the first third of a lopsided match | no | bounded and documented (features.md §2.3); closing it needs `Penalty ≈ K × 0.9` |
-| A hot reload of this module adopts nobody | no | `Load` calls `Adopt` before the handshake, so `IsAvailable` is still false and every connected player stays sessionless — unrated — until they reconnect. Predates periods; §2.5 describes the intent |
-| A hot reload of core leaves this module deaf to core's events | no | `Attach` keeps the first `EloPointsModule` (`_module ??=`), still subscribed to the unloaded core's cleared hub, so `PeriodChanged`, `PlayerReset`, `PlayerDataLoaded` and `PlayersPurged` stop arriving until this module reloads too. Every official module binds this way |

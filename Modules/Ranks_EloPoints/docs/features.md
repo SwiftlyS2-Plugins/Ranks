@@ -8,10 +8,13 @@
 An Elo rating that replaces core's scoring entirely. Rating moves on **outcome
 against expectation**: who you beat matters more than how many you killed.
 
-**It is an absolute module** (FR-PTS-00) and pairs with
-`Rank.UseCoreRankingLogic = false`. Core keeps persistence, the ladder, the
+**It is an absolute module** (FR-PTS-00). It claims scoring from core
+(FR-API-14), so core awards none of its own points while it runs, whatever
+`Rank.UseCoreRankingLogic` says; against a Ranks older than the claim it pairs
+with that setting at `false`. Core keeps persistence, the ladder, the
 scoreboard, the commands and the menus; this module supplies the only number
-that goes into them.
+that goes into them — an admin's `!setpoints`, `!givepoints` and
+`!removepoints` aside (§2.6).
 
 ---
 
@@ -173,11 +176,17 @@ for any match*, which is the one outcome that must not be silent.
 A match that never reaches an end — map change, server restart — **pays nobody**.
 Nothing is written mid-match, so there is nothing to undo.
 
+Nor is a match the module was loaded into part-way — a reload on a running
+server. Its earlier rounds were never accrued, so it is left unrated; the players
+already connected get their sessions at once and are rated from the next match.
+
 ### 2.2 Joining and leaving
 
 A match session is keyed on **SteamID, not slot**, and survives a disconnect.
 That is what makes a reconnect invisible: the same session resumes accruing, and
-the player is settled at match end as though they had never left.
+the player is settled at match end as though they had never left. A player Steam
+authorizes only after they entered, or who entered while Ranks was not loaded, gets
+their session once Ranks loads their record.
 
 **Nothing is written to the database before match end.** Whether a player
 abandoned is only knowable once the match is over, so there is no earlier moment
@@ -274,6 +283,36 @@ dropped, and the player is rated on the rest of the match only.
 Before 1.1.0 the module never heard about a reset, so the old rating came back at
 the player's next match end.
 
+### 2.6 Admin commands
+
+Core's `!setpoints`, `!givepoints` and `!removepoints` are the only point changes
+that reach a rating. The module recognises them by the reasons core writes
+— `admin.set`, `admin.add`, `admin.subtract` (FR-CMD-03) — and takes the change
+into the player's rating for the current period:
+
+| Command | Rating becomes |
+|---|---|
+| `!setpoints` | the new total |
+| `!givepoints`, `!removepoints` | the rating moved by what core applied after its `Rank.MinPoints` floor, so the fraction survives |
+
+`!setpoints` sets the rating even to the total the player already shows — Ranks 1.5.0
+reports that too — which is how an admin makes a total another plugin moved stick.
+
+The rating is cached at once, so the resync on the player's next join agrees
+with it, and written in order with every other write. The write counts no match:
+`matches` and `abandons` stay as they were, and a player who had no row starts
+on 0 of each — and, with no match in the period, still has no standing in the
+published API. A player mid-match keeps the rounds they had accrued; only the
+rating the match settles from moves.
+
+Before 1.2.0 the module saw none of this, so the next resync or match end wrote
+the old rating straight back over an admin's change.
+
+**Every other point change is overwritten.** Another plugin's `AddPoints` or
+`SetPoints` lands in core's points and lasts until the rating is next written —
+the player's next match end or join. The rating is the one authority; an admin
+is the only thing that outranks it.
+
 ---
 
 ## 3. Bots and unrated players
@@ -318,6 +357,8 @@ operator has already stated whether bots count.
 | The period a rating belongs to | `CurrentPeriod` | exists (FR-API-13) |
 | Restart every rating with the season | `PeriodChanged` | exists (FR-API-13) |
 | Clear a reset player's rating | `PlayerReset` | exists (FR-API-13) |
+| Stop core scoring on its own, without the operator | `ClaimScoring`, `ReleaseScoring` | exists (FR-API-14) |
+| Take an admin's change into the rating | `PointsChanged`, reasons `admin.*` | exists (FR-API-04, FR-CMD-03) |
 
 **Performance inputs come from diffing `GetSnapshot`, not from `GetStat`.** Both
 expose the same counters, but they are lifetime totals — the module needs the
@@ -325,16 +366,17 @@ delta across one match, so it snapshots at match start and again at match end.
 Mid-match joiners are snapshotted on `PlayerDataLoaded` instead, which is the
 only moment their record is guaranteed resident.
 
-Core's counters keep updating with `UseCoreRankingLogic` off (FR-PTS-00), which
+Core's counters keep updating while its own scoring is off (FR-PTS-00), which
 is what makes this work at all.
 
 ### Deviation from FR-MOD-05
 
 Rule 4 says a rating module writes "at round end, match end and on disconnect".
-This module writes **at match end only**. Round-end writes would be thrown away
-by a restart, and a disconnect write cannot be correct because abandonment is
-not yet decided. The durability rule 5 exists to protect is satisfied by the
-module's own table being authoritative (§5).
+This module writes **at match end only**, apart from an admin's point command
+(§2.6). Round-end writes would be thrown away by a restart, and a disconnect
+write cannot be correct because abandonment is not yet decided. The durability
+rule 5 exists to protect is satisfied by the module's own table being
+authoritative (§5).
 
 ---
 
@@ -352,14 +394,17 @@ ledger (FR-DB-05).
 | `abandons` | `INT` | for operator visibility, not used in the formula |
 | `updated_at` | `DATETIME` | |
 
-**One row per player, for the period they last played in.** A row left on an
-older period is that period's final rating. It moves to
-`ranks_elopoints_history` — the same columns, keyed `(steam_id, period)` — the
-first time anything touches the player in a later period: their next join, or
-their next match end. So the current season's leaderboard is `ranks_elopoints`
-filtered to the current period, and a past season's is its history rows plus any
-`ranks_elopoints` rows still holding it. Moving rows lazily, the way core moves
-an offline player's row on their next load, means a boundary costs no bulk write.
+**One row per player, for the latest period they played in or had their rating
+changed by an admin in.** A row left on an older period is that period's final
+rating. It moves to `ranks_elopoints_history` — the same columns, keyed
+`(steam_id, period)` — the first time anything touches the player in a later
+period: their next join, their next match end, or an admin's change. So the
+current season's leaderboard is `ranks_elopoints` filtered to the current period,
+and a past season's is its history rows plus any `ranks_elopoints` rows still
+holding it — in both, only rows with `matches > 0`. A row an admin's change
+created for a player who has not played in its period is their rating, but not a
+standing (§2.6). Moving rows lazily, the way core moves an offline player's row on
+their next load, means a boundary costs no bulk write.
 
 **The `DECIMAL` is the point of the table.** Core's `points` is an `INT` (Q15),
 and Elo deltas are fractional. Truncating each delta into core would accumulate
@@ -384,7 +429,7 @@ committed here, and it is pushed to core on their next `PlayerDataLoaded`.
 | Decide who may join or queue | this module rates, it does not gate — matchmaking is the operator's system |
 | Adjust for a 5v4 after a disconnect | Faceit does not either; the expected score already reflects the remaining team's average |
 | Handle FFA, deathmatch or arenas | no meaningful notion of two teams or a match result |
-| Register itself as the active scorer | core deliberately tracks no such thing (FR-PTS-00); two absolute modules at once is an operator constraint, not a detectable error |
+| Keep another plugin's points | the rating is the one authority and is written back at the next match end or join; only core's admin commands are taken into it (§2.6) |
 | Award anything per kill | that is core's model, and this module exists to replace it |
 | An all-time rating | a rating is a level, not a running total — one season's 1450 plus the next one's 1380 means nothing — so the API answers `AllTime` with nothing |
 | Carry part of last season's rating into the next (a soft reset) | core restarts everyone's points at `StartPoints`; a rating seeded anywhere else would disagree with the ladder from the first match on |

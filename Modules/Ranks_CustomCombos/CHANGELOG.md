@@ -14,6 +14,25 @@ Notable changes to Ranks_CustomCombos, newest first.
 
      See .github/instructions/changelog.instructions.md for the full style. -->
 
+## [1.1.4] - 2026-11-17
+
+- With Ranks 1.5.0, a startup warning says when a rating module such as Ranks_EloPoints owns
+  scoring. Combos are counted then, but pay no points.
+- Reloading Ranks on a running server no longer removes the **Combos** menu row or stops
+  resets and new seasons from reaching combo counts.
+- The `SuppressCoreAwards is on` line appears only with `General.DetailedLogging` on, and
+  no longer repeats each time Ranks reloads.
+- Reloading the module from another plugin no longer runs the startup cleanup of combo
+  rows mid-game.
+- A reset or purge that fails, for example during an outage, is retried with the next
+  save instead of being lost, unless the database refuses it three times.
+- Loading Ranks on a running server after this module no longer runs the cleanup of
+  purged players' rows mid-game.
+- When SwiftlyS2 itself is loaded on a running server, the warning that a rating module
+  owns scoring appears once instead of twice.
+- On a server without Ranks, a `config.jsonc` edit no longer logs
+  `CRITICAL: Unobserved task exception`.
+
 ## [1.1.3] - 2026-11-09
 
 - Added Ukrainian translations.

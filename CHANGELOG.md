@@ -22,6 +22,48 @@ Notable changes to Ranks, newest first.
 
 ---
 
+## [1.5.0] - 2026-11-17
+
+Worth updating if you run Ranks_EloPoints. Update it to 1.2.0, and the other modules, with
+this release.
+
+- A rating module such as Ranks_EloPoints now switches core's own scoring off by itself
+  while it runs, so `Rank.UseCoreRankingLogic` no longer needs changing.
+- With `Rank.UseCoreRankingLogic` left `true`, a warning names the rating module that took
+  over scoring.
+- Two rating modules at once are reported at startup as an error naming both.
+- The startup warning about `Rank.UseCoreRankingLogic` being `false` now appears only when
+  no rating module has taken over scoring.
+- The `Rank.UseCoreRankingLogic` warning also appears after Ranks is reloaded on a running
+  server.
+- A module installed or updated on a running server now gets its tables within moments,
+  without pausing the game, instead of at the next restart.
+- Reloading Ranks from another plugin, through SwiftlyS2's plugin manager, no longer leaves
+  connected players untracked, skips modules' tables or runs the startup purge mid-game.
+- With the modules from this release, reloading Ranks on a running server no longer cuts
+  them off: their menu rows stay, and resets and new seasons still reach them.
+- A player leaving while a save was running no longer loses their latest progress.
+- Points that changed and changed back while two saves of a player were in progress are no
+  longer left at the in-between total.
+- On a database several servers share, coming back no longer restores points older than
+  the ones saved elsewhere.
+- A player who joins the slot of someone whose data was still loading no longer earns
+  points for that player.
+- Replacing Ranks' files on a running server, which reloads it, can no longer crash the
+  server while it picks up the players already connected.
+- Reloading Ranks straight after loading it no longer sets up a module's tables twice at
+  once.
+- When SwiftlyS2 itself is loaded on a running server, the `Rank.UseCoreRankingLogic`
+  warning appears once instead of twice.
+- `!setpoints` to the total a player already has now reaches Ranks_EloPoints, which sets
+  their rating to it.
+- Plugins can take over scoring through `ClaimScoring`, `ReleaseScoring` and `ScoringOwner`
+  ([API Reference](https://github.com/SwiftlyS2-Plugins/Ranks/wiki/API-Reference#scoring-claim)).
+- `PlayerDataSaved` is now raised on the game thread, as the API documents.
+- `AddPoints`, `SetPoints`, `SetDisplayOverride` and `ClearDisplayOverride` called from
+  another thread now apply on the next game tick
+  ([API Reference](https://github.com/SwiftlyS2-Plugins/Ranks/wiki/API-Reference)).
+
 ## [1.4.0] - 2026-11-08
 
 - New `Scoreboard.CustomRankStep` spaces Custom-mode tiers through a larger icon set: `10`

@@ -399,10 +399,18 @@ clears its own figures:
 A batch already handed to the writer must not put the old figures back after the delete.
 Every database operation the writer performs runs from one queue, in the order it was
 handed over, so a reset runs after every batch cut before it — and drops the player's
-entries for the wiped season from the retry buffer if one of those batches failed.
+entries for the wiped season from the retry buffer if one of those batches failed. A
+reset that fails is retried with the next write, still ahead of everything recorded
+after it. One the database refuses three times — no `DELETE` permission, say — is
+dropped with an error in the log, so the writes behind it are not held back. Connection
+failures, deadlocks, lock waits and timeouts the driver marks transient never count, and
+neither does anything thrown outside the reset's own statements.
 
 ### 8.5 Purges
 
 `PlayersPurged` deletes the players from all six tables: a purge takes a player's past
-seasons too, as it does in core (FR-DB-08). The cold-start orphan reconcile (§8 of the
-implementation notes) covers the per-season tables as well.
+seasons too, as it does in core (FR-DB-08), and one that fails is retried with the next
+write, and dropped like a reset if the database refuses it three times. It deletes from the
+per-season tables even with seasons off, so a missing one fails every purge. The orphan
+reconcile in core's maintenance window (§8.1 of the implementation notes) covers the
+per-season tables as well.

@@ -24,12 +24,28 @@ internal sealed class SchemaMigrator
     private readonly ILogger _logger;
 
     /// <remarks>
+    /// Guards both sets, the switch and the background chain. A module registers from its handshake, which SwiftlyS2
+    /// runs on the game thread for a console load or reload and on a pool thread for its file watcher. Never held while
+    /// a background migration runs, or the next handshake would wait for it.
+    /// </remarks>
+    private readonly Lock _gate = new();
+
+    /// <remarks>
     /// The handshake re-runs on every plugin load and unload, so modules re-register constantly.
     /// MigrateUp() on an up-to-date ledger is cheap but not free.
     /// </remarks>
     private readonly HashSet<(Assembly Assembly, string PluginId)> _migrated = [];
 
     private readonly List<(Assembly Assembly, string PluginId)> _pending = [];
+
+    /// <summary>True once nothing will drain the queue again, so a registration is migrated in the background at once.</summary>
+    private bool _migratesOnRegister;
+
+    /// <summary>The background migration queued last; the next one runs after it.</summary>
+    private Task _background = Task.CompletedTask;
+
+    /// <summary>True once core is unloading, so a background migration that has not started yet is dropped.</summary>
+    private volatile bool _stopped;
 
     public SchemaMigrator(ISwiftlyCore core, DatabaseConnection database, TableNames tables, ILogger logger)
     {
@@ -39,52 +55,166 @@ internal sealed class SchemaMigrator
         _logger = logger;
     }
 
-    /// <summary>Queues a module's assembly. Idempotent — safe to call from every handshake.</summary>
+    /// <summary>Queues a module's assembly, or past startup migrates it in the background. Idempotent, and never throws.</summary>
+    /// <remarks>
+    /// Runs inside the registering module's handshake, which SwiftlyS2 does not guard (FR-DB-05): an exception escaping
+    /// it fails every plugin on the server.
+    /// </remarks>
     public void Register(Assembly assembly, string pluginId)
     {
         var key = (assembly, pluginId);
 
-        if (_migrated.Contains(key) || _pending.Contains(key)) return;
+        lock (_gate)
+        {
+            if (_migrated.Contains(key) || _pending.Contains(key)) return;
 
-        _pending.Add(key);
+            if (_migratesOnRegister) QueueModule(key);
+            else _pending.Add(key);
+        }
+    }
+
+    /// <summary>Migrates every module in the background from here on, starting with any registration already queued.</summary>
+    /// <remarks>
+    /// For a core that will not reach OnAllPluginsLoaded, the only other drain: one loaded into a running server, which
+    /// calls this before any module registers, or one that took itself for a server start and learns otherwise on its
+    /// first tick, by when the handshake has queued every module.
+    /// </remarks>
+    public void MigrateOnRegister()
+    {
+        lock (_gate)
+        {
+            _migratesOnRegister = true;
+
+            foreach (var key in _pending) QueueModule(key);
+
+            _pending.Clear();
+        }
     }
 
     /// <summary>Migrates core's own schema. Throws — the caller decides what a failure means.</summary>
+    /// <remarks>On the loading thread, unlike a module's: core cannot serve until it knows its schema is usable.</remarks>
     public void MigrateCore()
     {
         WarnOnExportedMigrator();
         Run(typeof(SchemaMigrator).Assembly, _tables.CoreLedger, "Ranks");
     }
 
-    /// <summary>Migrates every queued module, isolating each failure.</summary>
+    /// <summary>Migrates every queued module, then every later registration in the background as it arrives.</summary>
+    /// <remarks>Here rather than in the background: this is server start, before any player can connect to wait on it.</remarks>
+    public void MigratePendingModules()
+    {
+        lock (_gate)
+        {
+            _migratesOnRegister = true;
+
+            foreach (var key in _pending) MigrateModule(key);
+
+            _pending.Clear();
+        }
+    }
+
+    /// <summary>Drops every background migration that has not started; <see cref="WaitForRunning"/> waits for the one already running.</summary>
+    /// <remarks>For Unload. The next load of core keeps no record of this one's runs and migrates every module again.</remarks>
+    public void Stop() => _stopped = true;
+
+    /// <summary>Waits up to <paramref name="budget"/> for the background migration already running, for Unload after <see cref="Stop"/>.</summary>
+    /// <remarks>
+    /// SwiftlyS2 loads every plugin into a load context of its own, so the next load of core shares no lock with this
+    /// one, and would start migrating the same module while this run still works on its tables and ledger. After
+    /// <see cref="Stop"/> every run behind it is a no-op, so the end of the chain is the end of that run. Logged once,
+    /// ungated, when the budget runs out.
+    /// </remarks>
+    public void WaitForRunning(TimeSpan budget)
+    {
+        Task running;
+
+        lock (_gate) running = _background;
+
+        if (Task.WaitAny([running], budget) < 0)
+            _logger.LogWarning(
+                "Ranks: a module migration was still running after a further {Seconds}s of unloading; loading Ranks " +
+                "again straight away may migrate that module twice at once.",
+                budget.TotalSeconds);
+    }
+
+    /// <summary>Migrates one module on the calling thread. Called under the gate.</summary>
+    /// <remarks>Recorded as migrated even when it fails, as a queued one is, so the handshake does not retry it on every rebuild.</remarks>
+    private void MigrateModule((Assembly Assembly, string PluginId) key)
+    {
+        _migrated.Add(key);
+
+        if (Locate(key) is { } path) Migrate(key, path);
+    }
+
+    /// <summary>Queues one module's migrations behind every background migration already queued. Called under the gate.</summary>
+    /// <remarks>
+    /// Off the registering thread: a console load or reload runs the handshake on the game thread, which would otherwise
+    /// stall while the module's assembly loads and its ledger is checked. The file is found here, on the thread that
+    /// registers or drains the queue, never on the background chain, because SwiftlyS2's plugin list is not safe to read
+    /// while another load may be changing it.
+    /// </remarks>
+    private void QueueModule((Assembly Assembly, string PluginId) key)
+    {
+        _migrated.Add(key);
+
+        if (Locate(key) is not { } path) return;
+
+        _background = _background.ContinueWith(
+            _ => MigrateUnlessStopped(key, path), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+
+    private void MigrateUnlessStopped((Assembly Assembly, string PluginId) key, string path)
+    {
+        if (!_stopped) Migrate(key, path);
+    }
+
+    /// <summary>Migrates one module against its own ledger, isolating every failure. Never throws.</summary>
     /// <remarks>
     /// Core has taken on running third-party code (FR-DB-05 req. 9); an unhandled throw from one
     /// module would otherwise take core's schema and every other module down with it.
     /// </remarks>
-    public void MigratePendingModules()
+    private void Migrate((Assembly Assembly, string PluginId) key, string path)
     {
-        if (_pending.Count == 0) return;
-
-        foreach (var (assembly, pluginId) in _pending.ToArray())
+        try
         {
-            var context = new ModuleMigrationContext(assembly);
-
-            try
-            {
-                Run(context.LoadModule(LocateModule(assembly, pluginId)), _tables.LedgerFor(pluginId), pluginId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ranks: migrations for module {PluginId} failed; core and other modules are unaffected.", pluginId);
-            }
-            finally
-            {
-                context.Unload();
-                _migrated.Add((assembly, pluginId));
-            }
+            RunModule(key.Assembly, path, key.PluginId);
         }
+        catch (Exception ex)
+        {
+            ReportModuleFailure(ex, key.PluginId);
+        }
+    }
 
-        _pending.Clear();
+    /// <summary>The module's assembly file, or null — reported — when it cannot be found.</summary>
+    private string? Locate((Assembly Assembly, string PluginId) key)
+    {
+        try
+        {
+            return LocateModule(key.Assembly, key.PluginId);
+        }
+        catch (Exception ex)
+        {
+            ReportModuleFailure(ex, key.PluginId);
+            return null;
+        }
+    }
+
+    private void ReportModuleFailure(Exception ex, string pluginId) =>
+        _logger.LogError(ex, "Ranks: migrations for module {PluginId} failed; core and other modules are unaffected.", pluginId);
+
+    /// <summary>Migrates a second load of the module's assembly, bound to core's FluentMigrator, then unloads it.</summary>
+    private void RunModule(Assembly assembly, string path, string pluginId)
+    {
+        var context = new ModuleMigrationContext(assembly);
+
+        try
+        {
+            Run(context.LoadModule(path), _tables.LedgerFor(pluginId), pluginId);
+        }
+        finally
+        {
+            context.Unload();
+        }
     }
 
     private void Run(Assembly assembly, string ledger, string pluginId)

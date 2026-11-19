@@ -17,7 +17,7 @@ namespace Ranks;
 
 [PluginMetadata(
     Id = "Ranks",
-    Version = "1.4.0",
+    Version = "1.5.0",
     Name = "Ranks",
     Author = "Shmitzas",
     Description = "Extensive ranks and playtime data collection plugin.")]
@@ -25,6 +25,18 @@ public sealed partial class Ranks : BasePlugin
 {
     /// <remarks>Bounded so a hung database cannot hold the server in shutdown indefinitely.</remarks>
     private static readonly TimeSpan UnloadFlushBudget = TimeSpan.FromSeconds(8);
+
+    /// <remarks>
+    /// Bounded like the flush, which it follows and which the run overlaps. A module migration runs in the background
+    /// for under a second after a load into a running server, so only a reload about that quick waits at all.
+    /// </remarks>
+    private static readonly TimeSpan UnloadMigrationBudget = TimeSpan.FromSeconds(8);
+
+    /// <remarks>
+    /// The handshake after a load into a running server normally finishes well inside the delay, and the warning still
+    /// lands beside it in the log. Module migrations run in the background, so they do not hold it up.
+    /// </remarks>
+    private const float HotLoadCheckDelaySeconds = 5f;
 
     /// <summary>Tables core reads, with the columns a missed migration would leave out.</summary>
     private static readonly (string Table, string Columns)[] RequiredReads =
@@ -57,6 +69,13 @@ public sealed partial class Ranks : BasePlugin
     private RankMenus _menus = null!;
     private CommandRegistry _commands = null!;
     private RanksApi _api = null!;
+    private CancellationTokenSource? _hotLoadCheck;
+
+    /// <summary>What Load decided (<see cref="LoadsIntoRunningServer"/>): true for a load into a running server.</summary>
+    private bool _loadedIntoRunningServer;
+
+    /// <summary>True once SwiftlyS2 has raised OnAllPluginsLoaded, which it does only while it starts.</summary>
+    private bool _allPluginsLoaded;
 
     /// <remarks>
     /// Stays empty: the engine is not up yet, and anything touching it here aborts plugin
@@ -78,9 +97,17 @@ public sealed partial class Ranks : BasePlugin
     {
     }
 
+    /// <remarks>
+    /// A load into a running server (<see cref="LoadsIntoRunningServer"/>) lands mid-round with players connected: it
+    /// adopts them, re-sends the rank reveal they were sent long ago, migrates modules as they register, and runs no
+    /// purge, because a reload is how an operator deploys a fix mid-session (FR-DB-09). One that finds no map is taken
+    /// for a server start until its first tick says otherwise (<see cref="ConfirmServerStart"/>).
+    /// </remarks>
     public override void Load(bool hotReload)
     {
         _logger = Core.LoggerFactory.CreateLogger("Ranks");
+
+        _loadedIntoRunningServer = LoadsIntoRunningServer(hotReload);
 
         LoadConfiguration();
         OpenDatabase();
@@ -92,41 +119,53 @@ public sealed partial class Ranks : BasePlugin
 
         if (_sessions.SchemaUsable)
         {
-            _sessions.Start(hotReload);
+            _sessions.Start();
             Core.Registrator.Register(_scoring);
             _commands.RegisterAll();
             _scoreboard.Start();
         }
-
-        WarnIfNobodyIsScoring();
 
         // Outside the probe gate: the reveal is a user message carrying no core data, so a schema
         // core cannot read is no reason to stop showing the ranks CS2 already holds.
         Core.Registrator.Register(_revealer);
         _revealer.Start();
 
-        // A hot reload lands mid-round with players already in, and the reveal they were sent is
-        // long gone from the client's state.
-        if (hotReload) _revealer.RevealToAll();
+        if (_loadedIntoRunningServer) OnGameThread(TakeOverConnectedPlayers);
 
         // Fires whether or not the probe passed — a module needs to know core settled either way.
         _api.MarkCoreReady();
 
-        // force: !hotReload, because a hot reload is how an operator deploys a fix mid-session and
-        // players are connected for it. Migrations are fine there; a purge is not.
-        _ = _sessions.RunMaintenanceAsync(force: !hotReload);
+        if (_loadedIntoRunningServer) PrepareForHotLoad();
+        else Core.Scheduler.NextTick(ConfirmServerStart);
     }
 
-    /// <summary>Migrates modules once every plugin has had a chance to register its assembly.</summary>
-    public override void OnAllPluginsLoaded() => _migrator.MigratePendingModules();
+    /// <summary>Migrates modules once every plugin has had a chance to register its assembly, runs the start's maintenance pass, then reports a server nobody scores on.</summary>
+    /// <remarks>
+    /// SwiftlyS2 raises it only while it starts, so a load into a running server never reaches it —
+    /// <see cref="PrepareForHotLoad"/> covers that — and it is what confirms a start to <see cref="ConfirmServerStart"/>.
+    /// SwiftlyS2 itself loading mid-game raises it after a Load that found a map up and scheduled the delayed scoring
+    /// check, which is cancelled so the warning is not logged twice.
+    /// </remarks>
+    public override void OnAllPluginsLoaded()
+    {
+        _allPluginsLoaded = true;
+        _hotLoadCheck?.Cancel();
+
+        _migrator.MigratePendingModules();
+        RunStartupMaintenance();
+        WarnIfNobodyIsScoring();
+    }
 
     public override void Unload()
     {
+        _hotLoadCheck?.Cancel();
+        _migrator?.Stop();
         _commands?.UnregisterAll();
         _revealer?.Dispose();
         _scoreboard?.Dispose();
         _sessions?.Stop();
         _sessions?.FlushOnUnload(UnloadFlushBudget);
+        _migrator?.WaitForRunning(UnloadMigrationBudget);
         _events?.Clear();
 
         _commandsConfig?.Dispose();
@@ -169,7 +208,7 @@ public sealed partial class Ranks : BasePlugin
         // Before the menus, which read the leaderboard through it. Nothing in the API needs them
         // back, so the order is a one-way dependency rather than a cycle to break.
         _api = new RanksApi(
-            _config, _points, _registry, _sessions, _awards, _ladder, _scoreboard,
+            Core, _config, _points, _registry, _sessions, _awards, _ladder, _scoreboard,
             _store, _migrator, _menuEntries, _tables, _database, _events, _logger);
 
         _menus = new RankMenus(Core, _ladder, _registry, _commandsConfig, _reset, _menuEntries, _api, _logger);
@@ -207,17 +246,98 @@ public sealed partial class Ranks : BasePlugin
                 Chat.Send(Core, player, "period.started");
     }
 
+    /// <summary>Adopts the players a load into a running server finds connected, and re-sends them the rank reveal.</summary>
     /// <remarks>
-    /// Unconditional, because core has no registry of who is scoring and deliberately does not
-    /// acquire one — so it cannot tell whether a rating module is present (FR-PTS-00).
+    /// Tracking reads each player's name and the reveal is a user message, both native, while Load may be off the game
+    /// thread: SwiftlyS2's file watcher runs it on a pool thread, and a plugin-API load on the caller's. The reveal goes
+    /// out whatever the schema probe said, like every other reveal.
+    /// </remarks>
+    private void TakeOverConnectedPlayers()
+    {
+        if (_sessions.SchemaUsable) _sessions.AdoptConnectedPlayers();
+
+        _revealer.RevealToAll();
+    }
+
+    /// <summary>Runs <paramref name="work"/> now when on the game thread, else on its next tick.</summary>
+    private void OnGameThread(Action work)
+    {
+        if (Core.IsGameThread) work();
+        else Core.Scheduler.NextTick(work);
+    }
+
+    /// <summary>Does what OnAllPluginsLoaded does at server start, the way a running server allows, for a load that never reaches it.</summary>
+    /// <remarks>
+    /// SwiftlyS2 re-runs only the handshake then. Modules are migrated in the background as they register — any already
+    /// queued first — the scoring check waits until a rating module has had the chance to claim from that handshake,
+    /// and maintenance runs only on a running server's terms: when due, with nobody connected (FR-DB-09).
+    /// </remarks>
+    private void PrepareForHotLoad()
+    {
+        _migrator.MigrateOnRegister();
+        _hotLoadCheck = Core.Scheduler.DelayBySeconds(HotLoadCheckDelaySeconds, WarnIfNobodyIsScoring);
+        _ = _sessions.RunMaintenanceAsync(force: false);
+    }
+
+    /// <summary>On the first tick, gives a load that took itself for a server start what a running server needs, unless OnAllPluginsLoaded came first.</summary>
+    /// <remarks>
+    /// Every real start reaches its first tick after OnAllPluginsLoaded: SwiftlyS2 raises it inside its own start, before
+    /// the engine runs a frame. Without it, the load found no map on a running server — a plugin-API load landing between
+    /// maps, where nothing shows the engine keeping <c>GlobalVars</c> readable. Its players re-enter on that map load, so
+    /// the migrations and the checks are all it lacks.
+    /// </remarks>
+    private void ConfirmServerStart()
+    {
+        if (!_allPluginsLoaded) PrepareForHotLoad();
+    }
+
+    /// <summary>The maintenance pass a server start forces (FR-DB-09), skipped after a Load that found a map up.</summary>
+    /// <remarks>
+    /// Here rather than in Load, so only a start SwiftlyS2 confirms forces it: a load that finds no map may be a
+    /// plugin-API load between maps, with players connected, and that never gets here. Getting here after a Load that
+    /// found a map up means SwiftlyS2 itself started on a running server.
+    /// </remarks>
+    private void RunStartupMaintenance()
+    {
+        if (!_loadedIntoRunningServer) _ = _sessions.RunMaintenanceAsync(force: true);
+    }
+
+    /// <summary>Whether this load lands on a server already running, which <paramref name="hotReload"/> alone does not say.</summary>
+    /// <remarks>
+    /// SwiftlyS2's plugin API — <c>IPluginManager.LoadPlugin</c> and <c>ReloadPlugin</c> — passes it false on a running
+    /// server. Plugins load at server start before the first map, so a map being up is what tells the two apart.
+    /// </remarks>
+    private bool LoadsIntoRunningServer(bool hotReload) => hotReload || MapIsLoaded();
+
+    /// <summary>Whether the engine has a map up; false when that cannot be read.</summary>
+    /// <remarks>
+    /// <c>GlobalVars</c> throws until the first map, and unguarded in Load that throw aborts the load (NFR-04), so the
+    /// one read Load makes is this guarded probe.
+    /// </remarks>
+    private bool MapIsLoaded()
+    {
+        try
+        {
+            return Core.Engine.GlobalVars.MaxClients > 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <remarks>
+    /// Waits for every plugin, because a rating module claims scoring from its handshake, which runs
+    /// after this plugin's Load. Silent while one holds the claim: that module is scoring (FR-PTS-00).
     /// </remarks>
     private void WarnIfNobodyIsScoring()
     {
-        if (_config.Current.Rank.UseCoreRankingLogic) return;
+        if (_config.Current.Rank.UseCoreRankingLogic || _awards.ScoringOwner is not null) return;
 
         _logger.LogWarning(
-            "Ranks: Rank.UseCoreRankingLogic is false, so core awards no points. " +
-            "That is correct only if a rating module is installed to own scoring; otherwise nobody is awarding anything.");
+            "Ranks: Rank.UseCoreRankingLogic is false and no module has claimed scoring, so core awards no points. " +
+            "That is correct only with a rating module too old to claim it, such as Ranks_EloPoints before 1.2.0; " +
+            "otherwise nobody is awarding anything.");
     }
 
     /// <summary>Runs core's own migrations, keeping the failure for the probe to judge.</summary>

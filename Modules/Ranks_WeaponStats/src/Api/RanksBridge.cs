@@ -53,6 +53,12 @@ internal sealed class RanksBridge
     /// <summary>Raised on the game thread after core reset a player, with the period it wiped — null while periods are off.</summary>
     public event Action<ulong, long?>? PlayerReset;
 
+    /// <summary>Raised on the game thread once core has loaded a player's record, with their SteamID.</summary>
+    public event Action<ulong>? PlayerLoaded;
+
+    /// <summary>Raised on the game thread in core's maintenance window: after the pass a server start forces, and later only on an empty server.</summary>
+    public event Action? MaintenanceDue;
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     public bool TryAcquire(IInterfaceManager interfaceManager)
     {
@@ -101,17 +107,54 @@ internal sealed class RanksBridge
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Attach(IRanksApi api)
     {
-        _module ??= new WeaponStatsModule(
+        var module = ModuleFor(api);
+
+        module.Register();
+        module.HandOverMigrations(typeof(RanksBridge).Assembly);
+    }
+
+    /// <summary>The module bound to <paramref name="api"/>, built afresh when a core reload has handed over a new instance.</summary>
+    /// <remarks>
+    /// A module's <c>Api</c> is fixed at construction, and a core reload clears the events and menu entries the
+    /// old instance fed — kept, the module would stay deaf to the new core. Its state lives in this plugin
+    /// (writer, collector, menus), so nothing is lost, and <c>Register</c> replays <c>OnCoreReady</c>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private WeaponStatsModule ModuleFor(IRanksApi api)
+    {
+        if (_module is WeaponStatsModule current && current.IsBoundTo(api)) return current;
+
+        if (_module is WeaponStatsModule stale) Retire(stale);
+
+        var module = new WeaponStatsModule(
             api,
             _core,
             _writer,
             _menus,
             () => CoreReady?.Invoke(),
             closed => PeriodClosed?.Invoke(closed),
-            (steamId, period) => PlayerReset?.Invoke(steamId, period));
+            (steamId, period) => PlayerReset?.Invoke(steamId, period),
+            steamId => PlayerLoaded?.Invoke(steamId),
+            () => MaintenanceDue?.Invoke());
 
-        ((WeaponStatsModule)_module).Register();
-        ((WeaponStatsModule)_module).HandOverMigrations(typeof(RanksBridge).Assembly);
+        _module = module;
+
+        return module;
+    }
+
+    /// <summary>Unsubscribes a module from the core instance that unloaded under it.</summary>
+    /// <remarks>Guarded: that core is gone, so a failure here costs nothing and must not stop the rebind.</remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Retire(WeaponStatsModule stale)
+    {
+        try
+        {
+            stale.Unregister();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_WeaponStats: could not unsubscribe from the Ranks instance that unloaded.");
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -172,6 +215,8 @@ internal sealed class WeaponStatsModule : RanksModuleBase
     private readonly Action _onCoreReady;
     private readonly Action<long?> _onPeriodClosed;
     private readonly Action<ulong, long?> _onPlayerReset;
+    private readonly Action<ulong> _onPlayerLoaded;
+    private readonly Action _onMaintenanceDue;
 
     public WeaponStatsModule(
         IRanksApi api,
@@ -180,7 +225,9 @@ internal sealed class WeaponStatsModule : RanksModuleBase
         WeaponStatsMenus menus,
         Action onCoreReady,
         Action<long?> onPeriodClosed,
-        Action<ulong, long?> onPlayerReset)
+        Action<ulong, long?> onPlayerReset,
+        Action<ulong> onPlayerLoaded,
+        Action onMaintenanceDue)
         : base(api, core)
     {
         _writer = writer;
@@ -188,9 +235,14 @@ internal sealed class WeaponStatsModule : RanksModuleBase
         _onCoreReady = onCoreReady;
         _onPeriodClosed = onPeriodClosed;
         _onPlayerReset = onPlayerReset;
+        _onPlayerLoaded = onPlayerLoaded;
+        _onMaintenanceDue = onMaintenanceDue;
     }
 
     public override string ModuleId => "Ranks_WeaponStats";
+
+    /// <summary>True when this module was built for <paramref name="api"/>.</summary>
+    public bool IsBoundTo(IRanksApi api) => ReferenceEquals(Api, api);
 
     /// <summary>Hands this assembly's migrations to core.</summary>
     /// <remarks>
@@ -227,6 +279,15 @@ internal sealed class WeaponStatsModule : RanksModuleBase
     /// to look the player up.
     /// </remarks>
     protected override void OnPlayersPurged(IReadOnlyList<ulong> steamIds) => _ = _writer.PurgeAsync(steamIds);
+
+    /// <remarks>
+    /// Starts the session of a player whose SteamID was still 0 when they were put in server, which under strict Steam
+    /// authorization is everyone Steam confirms late: core loads them only once it has the SteamID.
+    /// </remarks>
+    protected override void OnPlayerDataLoaded(RanksPlayerSnapshot player) => _onPlayerLoaded(player.SteamId);
+
+    /// <remarks>Core does not wait for subscribers, and the window is for work players would otherwise feel (FR-DB-09).</remarks>
+    protected override void OnMaintenanceDue() => _onMaintenanceDue();
 
     /// <remarks>
     /// Hands on <c>OldPeriod</c>: core raises this after <c>CurrentPeriod</c> has moved, so the counts

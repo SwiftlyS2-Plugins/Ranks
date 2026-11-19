@@ -30,7 +30,7 @@ internal sealed class PlayerRegistry
 
     public bool IsTracked(ulong steamId) => _records.ContainsKey(steamId);
 
-    /// <summary>Publishes a loaded record and binds it to the player's slot.</summary>
+    /// <summary>Publishes a loaded record and binds it to the player's slot, or to none for a slot of -1.</summary>
     /// <remarks>
     /// A reconnecting player adopts the resident record rather than a fresh one — it may still hold
     /// unsaved points, and replacing it would discard them.
@@ -63,7 +63,11 @@ internal sealed class PlayerRegistry
     }
 
     /// <summary>Drops a fully-saved record that no longer occupies a slot.</summary>
-    public void Evict(ulong steamId) => _records.TryRemove(steamId, out _);
+    /// <remarks>
+    /// Only while it is still the player's resident record: a settle can land after its owner returned and loaded a
+    /// newer one, and removing by SteamID alone would drop that.
+    /// </remarks>
+    public void Evict(PlayerRecord record) => _records.TryRemove(KeyValuePair.Create(record.SteamId, record));
 
     /// <summary>Removes purged players so core stops writing rows it just deleted.</summary>
     public void EvictAll(IEnumerable<ulong> steamIds)

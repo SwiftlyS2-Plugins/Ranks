@@ -23,10 +23,10 @@ Operator-defined kill combinations for the [Ranks](../../README.md) plugin.
 
 Without core this module is idle: no awards, no tables.
 
-> [!CAUTION]
-> **Do not enable `SuppressCoreAwards` alongside an absolute rating module** such as
-> `Ranks_EloPoints`. Both would be deciding the same number, and nothing detects it.
-> Additive mode (the default) is safe with either.
+> [!WARNING]
+> **Beside an absolute rating module such as `Ranks_EloPoints`, combos pay no points**,
+> with or without `SuppressCoreAwards` — that module owns every player's points. Combos
+> are still counted, and with Ranks 1.5.0 or newer this module says so at startup.
 
 ---
 
@@ -220,11 +220,11 @@ watching `player_death` on its own cannot stop core, and plugin order is not gua
 **Counting**
 
 A combo is counted whenever it matches and core counts the kill, even if no points
-follow — a combo worth `0`, a cancelled award, or core scoring switched off. Core does
-not count a kill below its `Rank.MinPlayers`, during a warmup its `WarmupPoints`
-excludes, or with `BotsEnabled` off when a bot is involved or a team is made up only of
-bots; such a kill never reaches this module. With a Ranks older than 1.0.4, combos count
-only while that Ranks awards points.
+follow — a combo worth `0`, a cancelled award, core scoring switched off, or a rating
+module owning scoring. Core does not count a kill below its `Rank.MinPlayers`, during a
+warmup its `WarmupPoints` excludes, or with `BotsEnabled` off when a bot is involved or a
+team is made up only of bots; such a kill never reaches this module. With a Ranks older
+than 1.0.4, combos count only while that Ranks awards points.
 
 **Award Flow**
 
@@ -279,7 +279,11 @@ lifetime list it has always been.
 | `!resetrank`, `!resetmyrank`, **Settings → Reset my rank**, seasons off | Every count the player has is deleted |
 | The same, seasons on | This season's counts are deleted and taken off the lifetime total. Earlier seasons stay, as they do in Ranks |
 | A `Database.PurgeDays` purge | Every row of the player, lifetime and per season, is deleted |
-| Server start | Rows of players Ranks no longer has — left by a purge while this module was not loaded — are deleted |
+| Server start — or Ranks' next maintenance on an empty server, for a module loaded mid-game | Rows of players Ranks no longer has — left by a purge while this module was not loaded — are deleted |
+
+A reset or purge that fails is retried with the next write; one the database refuses three
+times is dropped, with an error in the log. Connection failures, deadlocks, lock waits and
+timeouts that the database driver reports as transient never count toward the three.
 
 ---
 
@@ -332,6 +336,7 @@ as ordinary data, not an error.
 | Problem | Possible Cause | Solution |
 |---------|----------------|----------|
 | Nothing is awarded | No combos configured | Copy from `resources/examples/combos.jsonc` |
+| Warning "owns scoring, so combos are still counted but pay no points" | A rating module such as `Ranks_EloPoints` owns every player's points | Expected — combos count, and the rating module decides points |
 | "this module is idle" at startup | Ranks is not installed | Install Ranks alongside it |
 | A combo was skipped at load | Unknown attribute, empty `RequiresAll`, zero `Points`, or `Count` with suppression | The log names the combo and the reason |
 | Chat shows `noscope_hs` instead of words | No `combo.noscope_hs` translation | Add it to `resources/translations/en.jsonc` |
@@ -339,3 +344,4 @@ as ordinary data, not an error.
 | Points look doubled | Additive mode is intended — the combo adds to core's kill award | Enable `SuppressCoreAwards` to replace instead |
 | **Before seasons** lists no combos | Counts are kept per season only from when seasons were switched on | Expected — they are in **All time** |
 | No combo is recorded at all once seasons are on | `ranks_combos_period` is missing, and every write needs it with seasons on | Check the startup log for the migration error, then create the table — see Installation |
+| Error "gave up resetting the combo counts" or "gave up deleting the combo counts" | The database refused the delete three times: no `DELETE` permission, or `ranks_combos_period` is missing, which a purge needs even with seasons off | Fix what the error names. The dropped reset is not retried, so reset the player again; purged players' rows go at the next server start |

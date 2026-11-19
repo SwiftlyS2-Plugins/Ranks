@@ -16,7 +16,7 @@ namespace Ranks.CustomCombos;
 
 [PluginMetadata(
     Id = "Ranks_CustomCombos",
-    Version = "1.1.3",
+    Version = "1.1.4",
     Name = "Ranks CustomCombos",
     Author = "Shmitzas",
     Description = "Operator-defined kill combinations for the Ranks plugin.")]
@@ -34,11 +34,24 @@ public sealed class RanksCustomCombos : BasePlugin
     private CustomCombosApi _api = null!;
     private ComboMenus _menus = null!;
     private bool _contractLoadFailed;
-    private bool _hotReload;
+    private bool _loadedIntoRunningServer;
+
+    /// <summary>True once SwiftlyS2 has raised OnAllPluginsLoaded, which it does only while it starts.</summary>
+    private bool _allPluginsLoaded;
+
     private bool _reconciled;
+    private bool _suppressionReported;
     private volatile bool _periodsUnsupported;
 
+    /// <remarks>
+    /// Long past the point where the handshake after a load into a running server binds core, and still beside it in
+    /// the log. This module's migrations run in the background from that handshake, so a slow database cannot delay
+    /// what the check reads.
+    /// </remarks>
+    private const float HotLoadCheckDelaySeconds = 5f;
+
     private CancellationTokenSource? _flushTimer;
+    private CancellationTokenSource? _hotLoadCheck;
 
     public RanksCustomCombos(ISwiftlyCore core) : base(core)
     {
@@ -46,7 +59,7 @@ public sealed class RanksCustomCombos : BasePlugin
 
     public override void Load(bool hotReload)
     {
-        _hotReload = hotReload;
+        _loadedIntoRunningServer = LoadsIntoRunningServer(hotReload);
         _logger = Core.LoggerFactory.CreateLogger("Ranks_CustomCombos");
 
         LoadConfiguration();
@@ -64,6 +77,7 @@ public sealed class RanksCustomCombos : BasePlugin
         // naming it here would resolve Ranks.Contract on a server with no Ranks installed.
         _bridge = new RanksBridge(Core, _writer, _counters, _menus, matcher, _config.SuppressCoreAwards, _logger);
         _bridge.CoreReady += OnRanksReady;
+        _bridge.MaintenanceDue += ReconcileOrphansOnce;
 
         _rounds = new RoundWatcher(() => { if (_bridge.IsAvailable) _bridge.ResetRound(); });
 
@@ -74,6 +88,9 @@ public sealed class RanksCustomCombos : BasePlugin
 
         _commands.RegisterAll(_commandsConfig);
         StartFlushTimer();
+
+        if (_loadedIntoRunningServer) ScheduleHotLoadCheck();
+        else Core.Scheduler.NextTick(ConfirmServerStart);
     }
 
     /// <remarks>
@@ -114,11 +131,16 @@ public sealed class RanksCustomCombos : BasePlugin
 
     /// <remarks>
     /// Absence is reported from here, not from the binder: the binder runs on every rebuild and
-    /// would spam, while this runs once per load cycle and is the only point where field state is
-    /// authoritative.
+    /// would spam, while this runs once, at server start, and is the only point where field state is
+    /// authoritative. A hot load or reload never reaches it. SwiftlyS2 itself loading mid-game raises it after a Load
+    /// that found a map up and scheduled the delayed scoring check, which is cancelled so the warning is not logged
+    /// twice.
     /// </remarks>
     public override void OnAllPluginsLoaded()
     {
+        _allPluginsLoaded = true;
+        _hotLoadCheck?.Cancel();
+
         if (_bridge.IsAvailable)
         {
             if (_config.Rules.Count == 0)
@@ -126,6 +148,7 @@ public sealed class RanksCustomCombos : BasePlugin
                     "Ranks_CustomCombos: no combos are configured, so nothing will be awarded. " +
                     "See resources/examples/combos.jsonc.");
 
+            WarnIfScoringIsClaimed();
             return;
         }
 
@@ -150,6 +173,7 @@ public sealed class RanksCustomCombos : BasePlugin
     {
         _flushTimer?.Cancel();
         _flushTimer = null;
+        _hotLoadCheck?.Cancel();
 
         Core.Event.OnMapUnload -= OnMapUnload;
 
@@ -220,11 +244,90 @@ public sealed class RanksCustomCombos : BasePlugin
     private void OnRanksReady()
     {
         _bridge.RefreshBotPolicy();
-        ReconcileOrphansOnce();
+        ReportSuppressionOnce();
+    }
 
-        if (_config.SuppressCoreAwards)
-            _logger.LogInformation(
-                "Ranks_CustomCombos: SuppressCoreAwards is on — a kill matching a combo pays the combo instead of core's kill award.");
+    /// <summary>Narrates that <c>SuppressCoreAwards</c> is on, once per load of this module.</summary>
+    /// <remarks>Expected flow, so behind DetailedLogging (§4), and once because a Ranks reload replays the ready check.</remarks>
+    private void ReportSuppressionOnce()
+    {
+        if (_suppressionReported || !_config.SuppressCoreAwards || !_config.General.DetailedLogging) return;
+
+        _suppressionReported = true;
+        _logger.LogInformation(
+            "Ranks_CustomCombos: SuppressCoreAwards is on — a kill matching a combo pays the combo instead of core's kill award.");
+    }
+
+    /// <summary>Whether this load lands on a server already running, which <paramref name="hotReload"/> alone does not say.</summary>
+    /// <remarks>
+    /// SwiftlyS2's plugin API — <c>IPluginManager.LoadPlugin</c> and <c>ReloadPlugin</c> — passes it false on a running
+    /// server. Plugins load at server start before the first map, so a map being up is what tells the two apart.
+    /// </remarks>
+    private bool LoadsIntoRunningServer(bool hotReload) => hotReload || MapIsLoaded();
+
+    /// <summary>Whether the engine has a map up; false when that cannot be read.</summary>
+    /// <remarks><c>GlobalVars</c> throws until the first map, and unguarded in Load that throw aborts the load.</remarks>
+    private bool MapIsLoaded()
+    {
+        try
+        {
+            return Core.Engine.GlobalVars.MaxClients > 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Says once that combos pay nothing while a rating module owns scoring.</summary>
+    /// <remarks>
+    /// From the startup checks rather than the ready check: a rating module claims scoring from its own handshake,
+    /// which can run after this one. Core still asks this module about every kill then, so combos keep counting.
+    /// </remarks>
+    private void WarnIfScoringIsClaimed()
+    {
+        if (ScoringOwner() is not { } owner) return;
+
+        _logger.LogWarning(
+            "Ranks_CustomCombos: {Owner} owns scoring, so combos are still counted but pay no points while it runs.",
+            owner);
+    }
+
+    /// <summary>The scoring check OnAllPluginsLoaded runs at server start, for a load into a running server, which never reaches it.</summary>
+    /// <remarks>
+    /// A scheduler callback a few seconds after Load, once the handshake has bound core and let a rating module
+    /// claim, so it checks <see cref="RanksBridge.IsAvailable"/> before the bridge call that names a contract type.
+    /// </remarks>
+    private void CheckScoringAfterHotLoad()
+    {
+        if (_bridge.IsAvailable) WarnIfScoringIsClaimed();
+    }
+
+    private void ScheduleHotLoadCheck() =>
+        _hotLoadCheck = Core.Scheduler.DelayBySeconds(HotLoadCheckDelaySeconds, CheckScoringAfterHotLoad);
+
+    /// <summary>On the first tick, schedules the scoring check for a load that took itself for a server start, unless OnAllPluginsLoaded came first.</summary>
+    /// <remarks>
+    /// Every real start reaches its first tick after OnAllPluginsLoaded, which SwiftlyS2 raises inside its own start.
+    /// Without it, the load found no map on a running server — a plugin-API load landing between maps — and nothing else
+    /// would run the check.
+    /// </remarks>
+    private void ConfirmServerStart()
+    {
+        if (!_allPluginsLoaded) ScheduleHotLoadCheck();
+    }
+
+    /// <remarks>A Ranks older than 1.5.0 has no claim and throws MissingMethodException from the bridge call, which surfaces here.</remarks>
+    private string? ScoringOwner()
+    {
+        try
+        {
+            return _bridge.ScoringOwner();
+        }
+        catch (MissingMethodException)
+        {
+            return null;
+        }
     }
 
     private void StartFlushTimer()
@@ -305,14 +408,17 @@ public sealed class RanksCustomCombos : BasePlugin
             "and !resetrank does not clear them. Update Ranks to 1.1.0 or newer.");
     }
 
+    /// <summary>Deletes rows of players core no longer keeps, once per load of this module, in core's maintenance window.</summary>
     /// <remarks>
-    /// Cold start only, matching the rule that heavy work runs when no player can feel it (FR-DB-09).
-    /// Skipped on hot reload, and skipped when core could not resolve its table — deleting against a
-    /// half-broken schema is worse than leaving orphans.
+    /// Run from <c>MaintenanceDue</c>, which core raises after the pass a server start forces and otherwise only on an
+    /// empty server, so the sweep never runs where players can feel it (FR-DB-09). A module that binds to Ranks only on
+    /// a running server waits for that window — at the default <c>Database.MaintenanceIntervalHours</c> of 0, the next
+    /// start. Queued on the writer, so the handler returns at once. Skipped when core could not resolve its table —
+    /// deleting against a half-broken schema is worse than leaving orphans.
     /// </remarks>
     private void ReconcileOrphansOnce()
     {
-        if (_reconciled || _hotReload) return;
+        if (_reconciled) return;
 
         _reconciled = true;
 

@@ -15,8 +15,8 @@ internal sealed class PlayerRecord
 
     /// <summary>Closed periods whose final figures still await their history write, oldest first.</summary>
     /// <remarks>
-    /// Replaced, never mutated, and cleared only by <see cref="SettleArchives"/>: the save pass
-    /// settles off the game thread while a rollover may be replacing this on it.
+    /// Replaced, never mutated, and cleared only by <see cref="SettleArchives"/>: a rollover may replace it
+    /// between a save's snapshot and that save's settle, and a module's save may snapshot it off the game thread.
     /// </remarks>
     public PlayerHistoryRow[]? PendingArchives => Volatile.Read(ref _pendingArchives);
 
@@ -102,6 +102,15 @@ internal sealed class PlayerRecord
     public bool PendingShot { get; set; }
 
     public bool Dirty { get; set; }
+
+    /// <remarks>Raised only under <c>PlayerSessions</c>' save lock, which orders it; read by the settle on the game thread.</remarks>
+    private long _savesQueued;
+
+    /// <summary>Numbers a write of this record as it is queued, the newest highest.</summary>
+    public long StampSave() => Interlocked.Increment(ref _savesQueued);
+
+    /// <summary>Whether <paramref name="stamp"/> belongs to the newest write queued for this record.</summary>
+    public bool IsLatestSave(long stamp) => Volatile.Read(ref _savesQueued) == stamp;
 
     /// <summary>Zeroes every counter and sets the total — the one place progression is cleared.</summary>
     /// <remarks>

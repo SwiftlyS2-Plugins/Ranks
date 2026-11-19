@@ -39,6 +39,9 @@ internal sealed class RanksBridge
     /// <summary>The period every row of an install that never enabled periods sits in.</summary>
     private const long InitialPeriod = RanksPeriods.Initial;
 
+    /// <summary>This plugin's <c>[PluginMetadata]</c> id, which core knows the module and its claim by.</summary>
+    internal const string ModuleId = "Ranks_EloPoints";
+
     public RanksBridge(ISwiftlyCore core, RatingStore store, ILogger logger)
     {
         _core = core;
@@ -47,6 +50,12 @@ internal sealed class RanksBridge
     }
 
     public bool IsAvailable { get; private set; }
+
+    /// <summary>Where this module stands on core's scoring claim, as of the last handshake (FR-API-14).</summary>
+    public ScoringClaim ScoringClaim { get; private set; }
+
+    /// <summary>The module that held the claim when this one was refused it.</summary>
+    public string? ScoringHolder { get; private set; }
 
     /// <summary>Raised once core reports ready, so the plugin can run its one-shot checks.</summary>
     public event Action? CoreReady;
@@ -101,19 +110,94 @@ internal sealed class RanksBridge
         }
     }
 
-    /// <remarks>Idempotent — the handshake re-runs on every plugin load and unload.</remarks>
+    /// <remarks>
+    /// Idempotent — the handshake re-runs on every plugin load and unload. Scoring is claimed first, so
+    /// the one-shot ready check <c>Register</c> may raise already knows how the claim went.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Attach(IRanksApi api)
     {
-        _module ??= new EloPointsModule(api, _core, this, _store, () => CoreReady?.Invoke());
+        ClaimScoring();
 
-        ((EloPointsModule)_module).Register();
-        ((EloPointsModule)_module).HandOverMigrations(typeof(RanksBridge).Assembly);
+        var module = ModuleFor(api);
+
+        module.Register();
+        module.HandOverMigrations(typeof(RanksBridge).Assembly);
+    }
+
+    /// <summary>The module bound to <paramref name="api"/>, built afresh when a core reload has handed over a new instance.</summary>
+    /// <remarks>
+    /// A module's <c>Api</c> is fixed at construction, and a core reload clears the events the old instance fed —
+    /// kept, the module would stop hearing resets, new periods and admin changes. Its state lives in this plugin
+    /// (tracker, store), so nothing is lost, and <c>Register</c> replays <c>OnCoreReady</c>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private EloPointsModule ModuleFor(IRanksApi api)
+    {
+        if (_module is EloPointsModule current && current.IsBoundTo(api)) return current;
+
+        if (_module is EloPointsModule stale) Retire(stale);
+
+        var module = new EloPointsModule(api, _core, this, _store, () => CoreReady?.Invoke());
+        _module = module;
+
+        return module;
+    }
+
+    /// <summary>Unsubscribes a module from the core instance that unloaded under it.</summary>
+    /// <remarks>Guarded: that core is gone, so a failure here costs nothing and must not stop the rebind.</remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Retire(EloPointsModule stale)
+    {
+        try
+        {
+            stale.Unregister();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ranks_EloPoints: could not unsubscribe from the Ranks instance that unloaded.");
+        }
+    }
+
+    /// <summary>Takes scoring from core, so core awards none of its own points while this module runs (FR-API-14).</summary>
+    /// <remarks>
+    /// Through the interface this handshake bound, never the module's, which still holds the unloaded core's until
+    /// <see cref="ModuleFor"/> rebuilds it; a new instance holds no claim until this runs again. A Ranks older than
+    /// 1.5.0 has no claim and throws MissingMethodException from the call below, which surfaces here; its switch alone decides.
+    /// </remarks>
+    private void ClaimScoring()
+    {
+        if (ScoringClaim == ScoringClaim.Unsupported) return;
+
+        try
+        {
+            ScoringClaim = RequestClaim(out var holder);
+            ScoringHolder = holder;
+        }
+        catch (MissingMethodException)
+        {
+            ScoringClaim = ScoringClaim.Unsupported;
+        }
+    }
+
+    /// <summary>Asks core for the claim, naming the holder when it refuses. Unchanged while core is absent.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private ScoringClaim RequestClaim(out string? holder)
+    {
+        holder = null;
+
+        if (_api is not IRanksApi api) return ScoringClaim;
+        if (api.ClaimScoring(ModuleId)) return ScoringClaim.Held;
+
+        holder = api.ScoringOwner;
+        return ScoringClaim.Refused;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void Unwire()
     {
+        if (ScoringClaim == ScoringClaim.Held) ReleaseScoring();
+
         if (_module is EloPointsModule module) module.Unregister();
 
         _module = null;
@@ -121,8 +205,20 @@ internal sealed class RanksBridge
         IsAvailable = false;
     }
 
+    /// <summary>Hands scoring back to core's own switch as this module goes.</summary>
+    /// <remarks>
+    /// Kept out of <see cref="Unwire"/>'s body and reached only after a granted claim: JIT-compiling it against a
+    /// Ranks without the member fails, and inside Unwire that would skip the unsubscribe after it.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReleaseScoring() => (_api as IRanksApi)?.ReleaseScoring(ModuleId);
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     public int? GetPoints(ulong steamId) => _api is IRanksApi api ? api.GetPoints(steamId) : null;
+
+    /// <summary>Whether core holds the player's record yet. False while core is absent.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool IsLoaded(ulong steamId) => _api is IRanksApi api && api.IsLoaded(steamId);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void SetPoints(ulong steamId, int points, string reason) => (_api as IRanksApi)?.SetPoints(steamId, points, reason);
@@ -216,6 +312,11 @@ internal sealed class RanksBridge
 /// </remarks>
 internal sealed class EloPointsModule : RanksModuleBase
 {
+    /// <summary>The reason core's <c>!setpoints</c> writes; <c>!givepoints</c> and <c>!removepoints</c> write the two after it.</summary>
+    private const string AdminSet = "admin.set";
+    private const string AdminAdd = "admin.add";
+    private const string AdminSubtract = "admin.subtract";
+
     private readonly RanksBridge _bridge;
     private readonly RatingStore _store;
     private readonly Action _onCoreReady;
@@ -228,7 +329,10 @@ internal sealed class EloPointsModule : RanksModuleBase
         _onCoreReady = onCoreReady;
     }
 
-    public override string ModuleId => "Ranks_EloPoints";
+    public override string ModuleId => RanksBridge.ModuleId;
+
+    /// <summary>True when this module was built for <paramref name="api"/>.</summary>
+    public bool IsBoundTo(IRanksApi api) => ReferenceEquals(Api, api);
 
     /// <summary>Hands this assembly's migrations to core.</summary>
     /// <remarks>
@@ -252,9 +356,9 @@ internal sealed class EloPointsModule : RanksModuleBase
     }
 
     /// <remarks>
-    /// Two jobs in one handler: capture the match-start counters for a mid-match joiner, and push
-    /// a rating that was settled while the player was already gone back into core. Only a rating
-    /// from the current period is pushed — core has just started this player there.
+    /// Two jobs in one handler: capture the match-start counters for a mid-match joiner — starting the session of one
+    /// whose SteamID was not known when they entered — and push a rating that was settled while the player was
+    /// already gone back into core. Only a rating from the current period is pushed — core has just started this player there.
     /// </remarks>
     protected override void OnPlayerDataLoaded(RanksPlayerSnapshot player)
     {
@@ -273,6 +377,23 @@ internal sealed class EloPointsModule : RanksModuleBase
             && (int)Math.Round(rating) != player.Points)
             Api.SetPoints(player.SteamId, (int)Math.Round(rating), "elopoints.resync");
     }
+
+    /// <summary>Takes core's admin point commands into the player's rating for the current period.</summary>
+    /// <remarks>
+    /// Every other reason — another plugin's <c>AddPoints</c> or <c>SetPoints</c> included — is overwritten
+    /// by the rating at the player's next resync or match end, because the rating is the one authority.
+    /// </remarks>
+    protected override void OnPointsChanged(RanksPointsChangedArgs e)
+    {
+        if (!IsAdminChange(e.Reason) || _bridge.CurrentPeriod() is not { } period) return;
+
+        _bridge.Tracker?.AdoptAdminChange(
+            new AdminPointChange(e.SteamId, e.OldPoints, e.NewPoints, e.Delta, Absolute: e.Reason == AdminSet),
+            period,
+            Api.GetPointSettings().MinPoints);
+    }
+
+    private static bool IsAdminChange(string reason) => reason is AdminSet or AdminAdd or AdminSubtract;
 
     /// <remarks>
     /// Core has already removed its own rows by the time this fires, so the module must not expect

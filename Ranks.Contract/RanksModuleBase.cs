@@ -49,7 +49,11 @@ public abstract class RanksModuleBase
             Order = order,
         });
 
-    /// <remarks>Every handler below is raised on the game thread, so an override may touch players directly.</remarks>
+    /// <remarks>
+    /// Raised on the thread that calls <see cref="Register"/> — the handshake's, a pool thread under SwiftlyS2's file
+    /// watcher — so an override reaches players through <c>Core.Scheduler.NextTick</c>. Every other handler below is
+    /// raised on the game thread, so an override may touch players directly.
+    /// </remarks>
     protected virtual void OnCoreReady() { }
 
     protected virtual void OnPlayerDataLoaded(RanksPlayerSnapshot player) { }
@@ -75,7 +79,7 @@ public abstract class RanksModuleBase
 
     protected virtual void OnPlayerReset(RanksPlayerResetArgs e) { }
 
-    /// <summary>Subscribes and resolves readiness. Idempotent — call it from <c>Load</c>.</summary>
+    /// <summary>Subscribes and resolves readiness. Idempotent — call it from the handshake, where the API arrives.</summary>
     /// <remarks>
     /// The guard is what the handshake makes necessary: it re-runs on every plugin load and unload,
     /// so an unguarded <c>+=</c> is one duplicate subscription per rebuild.

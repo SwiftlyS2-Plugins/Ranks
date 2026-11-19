@@ -12,9 +12,9 @@ namespace Ranks.EloPoints.Api;
 /// Names its contract without JIT isolation, unlike <see cref="RanksBridge"/>: a provider
 /// hard-requires the assembly it publishes from, exactly as core does with Ranks.Contract.
 ///
-/// No session merge is needed here, unlike WeaponStats — a rating is written once, at match end,
-/// so the stored value is never behind. What a match in progress would contribute is deliberately
-/// not exposed: it has no result until it ends.
+/// No session merge is needed here, unlike WeaponStats — a rating is written at match end and when an
+/// admin's point command changes it, so the stored value is never behind. What a match in progress
+/// would contribute is deliberately not exposed: it has no result until it ends.
 ///
 /// Core's current period comes through the bridge, which answers null while core is unavailable;
 /// every query then answers empty, as it does before core is ready.
@@ -22,6 +22,14 @@ namespace Ranks.EloPoints.Api;
 internal sealed class EloPointsApi : IEloPointsApi
 {
     private const string Columns = "steam_id, rating, matches, abandons, updated_at";
+
+    /// <summary>The condition that makes a stored row a standing: a rated match completed in its period.</summary>
+    /// <remarks>
+    /// An admin's point command writes a rating without counting a match, so a player who has not played in
+    /// the period can hold a row with <c>matches = 0</c> — in history too, once a rollover archives it. The
+    /// contract gives such a player no standing; the module's own resync and match seeding still use the row.
+    /// </remarks>
+    private const string HasRatedMatch = "matches > 0";
 
     private readonly ISwiftlyCore _core;
     private readonly MatchTracker _tracker;
@@ -124,26 +132,27 @@ internal sealed class EloPointsApi : IEloPointsApi
     public bool IsInRatedMatch(ulong steamId) => _tracker.HasOpenSession(steamId);
 
     /// <remarks>
-    /// The current period reads the rating table alone, so a player who has not finished a match
-    /// since the rollover is not on it. A closed one also reads rating rows still on that period,
-    /// which move to history only when their player is next touched (FR-DB-10).
+    /// The current period reads the rating table alone. A closed one also reads rating rows still on
+    /// that period, which move to history only when their player is next touched (FR-DB-10). Neither
+    /// lists a player with no rated match in the period, even one an admin gave a row (<see cref="HasRatedMatch"/>).
     /// </remarks>
     private string TopSql(bool closed) => closed
         ? $"""
            SELECT {Columns} FROM (
-               SELECT {Columns} FROM {_history} WHERE period = @period
+               SELECT {Columns} FROM {_history} WHERE period = @period AND {HasRatedMatch}
                UNION ALL
-               SELECT {Columns} FROM {_table} WHERE period = @period
+               SELECT {Columns} FROM {_table} WHERE period = @period AND {HasRatedMatch}
            ) r
            ORDER BY rating DESC
            LIMIT @limit
            """
-        : $"SELECT {Columns} FROM {_table} WHERE period = @period ORDER BY rating DESC LIMIT @limit";
+        : $"SELECT {Columns} FROM {_table} WHERE period = @period AND {HasRatedMatch} ORDER BY rating DESC LIMIT @limit";
 
     private static EloStanding? ReadStanding(IDbConnection connection, string table, ulong steamId, long period)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT rating, matches, abandons, updated_at FROM {table} WHERE steam_id = @steam_id AND period = @period";
+        command.CommandText =
+            $"SELECT rating, matches, abandons, updated_at FROM {table} WHERE steam_id = @steam_id AND period = @period AND {HasRatedMatch}";
         Add(command, "@steam_id", (long)steamId);
         Add(command, "@period", period);
 

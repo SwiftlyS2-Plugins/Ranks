@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
 
@@ -21,8 +22,16 @@ internal sealed class Writer
     private readonly Func<bool> _detailedLogging;
     private readonly Lock _queueGate = new();
 
+    /// <summary>Changes a failed transaction left behind, applied again in queue order ahead of the next ones.</summary>
     /// <remarks>Touched only by queued operations, which never overlap, so it needs no lock of its own.</remarks>
-    private readonly List<ComboDelta> _retry = [];
+    private readonly List<Change> _retry = [];
+
+    /// <summary>How many failures of its own statements drop a reset or purge from the retry buffer.</summary>
+    /// <remarks>
+    /// Unbounded, one the database always refuses — no DELETE permission, a period table never created — holds every
+    /// later write back for the rest of the load. Only its own statements count, unless the driver marks the failure transient.
+    /// </remarks>
+    private const int ClearAttempts = 3;
 
     private Task _queue = Task.CompletedTask;
     private string _connectionName = "default";
@@ -53,7 +62,7 @@ internal sealed class Writer
     {
         if (!IsReady || batch.Count == 0) return Task.CompletedTask;
 
-        return Enqueue(() => WritePending(batch));
+        return Enqueue(() => Commit(batch.ConvertAll<Change>(delta => new Change.Add(delta))));
     }
 
     /// <summary>Clears a reset player's counts: all of them while <paramref name="period"/> is null, else that period's.</summary>
@@ -150,44 +159,119 @@ internal sealed class Writer
         }
     }
 
+    /// <summary>Applies whatever a failed transaction left behind, then <paramref name="changes"/>, in queue order and in one transaction.</summary>
     /// <remarks>
-    /// A failed batch goes back to the retry buffer whole, because its transaction rolled every row
-    /// back. Logged ungated: it is the data-loss path.
+    /// Never reordered: a reset or purge that failed stays ahead of every count drained after it, so those land on the
+    /// cleared rows instead of being cleared with them, until <see cref="GiveUpOn"/> drops it. A failed transaction rolled
+    /// every change back, so all of them stay. Logged ungated: it is the data-loss path.
     /// </remarks>
-    private void WritePending(List<ComboDelta> batch)
+    private void Commit(IEnumerable<Change> changes)
     {
-        _retry.AddRange(batch);
+        _retry.AddRange(changes);
 
-        List<ComboDelta> pending = [.. _retry];
-        _retry.Clear();
+        if (_retry.Count == 0) return;
+
+        Change? applying = null;
 
         try
         {
-            Write(pending);
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+
+            foreach (var change in _retry)
+            {
+                applying = change;
+                Apply(connection, transaction, change);
+            }
+
+            applying = null;
+            transaction.Commit();
+            _retry.Clear();
         }
         catch (Exception ex)
         {
-            _retry.AddRange(pending);
-            _logger.LogError(ex, "Ranks_CustomCombos: flush of {Count} row(s) failed; they are buffered for retry.", pending.Count);
+            if (applying is { } failed && GiveUpOn(failed, ex)) Commit([]);
+            else _logger.LogError(ex, "Ranks_CustomCombos: writing {Count} change(s) failed; they are buffered for retry.", _retry.Count);
         }
     }
 
-    /// <summary>Adds every delta to the lifetime table, and to its period's row when it carries one, in one transaction.</summary>
-    private void Write(List<ComboDelta> batch)
+    /// <summary>
+    /// Counts a failure of a reset's or purge's own statements that the driver does not mark transient, and drops the
+    /// change at <see cref="ClearAttempts"/> of them.
+    /// </summary>
+    /// <returns>True when it was dropped, so the changes queued behind it are written at once.</returns>
+    /// <remarks>A count is never given up on: it is kept until it is written.</remarks>
+    private bool GiveUpOn(Change failed, Exception error)
     {
-        using var connection = _core.Database.GetConnection(_connectionName);
-        connection.Open();
-        using var transaction = connection.BeginTransaction();
+        if (failed is Change.Add || IsTransient(error) || ++failed.Failures < ClearAttempts) return false;
 
-        foreach (var delta in batch)
+        _retry.RemoveAll(change => ReferenceEquals(change, failed));
+        ReportDropped(failed, error);
+
+        return true;
+    }
+
+    /// <summary>Whether the driver marks <paramref name="error"/>, or an exception it wraps, as transient: worth retrying unchanged.</summary>
+    /// <remarks>
+    /// Npgsql marks lost connections, deadlocks, and lock and command timeouts; MySqlConnector deadlocks and InnoDB
+    /// lock-wait timeouts but no lost connection or command timeout; System.Data.SQLite nothing, so every failure counts.
+    /// </remarks>
+    private static bool IsTransient(Exception? error) =>
+        error is not null && (error is DbException { IsTransient: true } || IsTransient(error.InnerException));
+
+    /// <remarks>Ungated: what the change would have cleared now stays.</remarks>
+    private void ReportDropped(Change dropped, Exception error)
+    {
+        switch (dropped)
         {
-            WriteOne(connection, transaction, delta);
+            case Change.Reset reset:
+                _logger.LogError(
+                    error,
+                    "Ranks_CustomCombos: gave up resetting the combo counts of {SteamId} after {Attempts} failed " +
+                    "attempts; they stay as they were.",
+                    reset.SteamId, dropped.Failures);
+                break;
 
-            if (delta.Period is { } period)
-                WritePeriod(connection, transaction, delta, period);
+            case Change.Purge purge:
+                _logger.LogError(
+                    error,
+                    "Ranks_CustomCombos: gave up deleting the combo counts of {Count} purged player(s) after " +
+                    "{Attempts} failed attempts; their rows stay.",
+                    purge.SteamIds.Count, dropped.Failures);
+                break;
         }
+    }
 
-        transaction.Commit();
+    private void Apply(IDbConnection connection, IDbTransaction transaction, Change change)
+    {
+        switch (change)
+        {
+            case Change.Add add:
+                AddDelta(connection, transaction, add.Delta);
+                break;
+
+            case Change.Reset { Period: { } current } reset:
+                ResetPeriod(connection, transaction, reset.SteamId, current);
+                break;
+
+            case Change.Reset reset:
+                Execute(connection, transaction, $"DELETE FROM {_table} WHERE steam_id = @steam_id", reset.SteamId);
+                break;
+
+            case Change.Purge purge:
+                Purge(connection, transaction, purge.SteamIds);
+                break;
+        }
+    }
+
+    /// <summary>Adds one delta to the lifetime table, and to its period's row when it carries one.</summary>
+    private void AddDelta(IDbConnection connection, IDbTransaction transaction, ComboDelta delta)
+    {
+        WriteOne(connection, transaction, delta);
+
+        if (delta.Period is { } period)
+            WritePeriod(connection, transaction, delta, period);
     }
 
     private void WriteOne(IDbConnection connection, IDbTransaction transaction, ComboDelta delta)
@@ -251,31 +335,17 @@ internal sealed class Writer
     }
 
     /// <remarks>
-    /// Retry entries the reset covers are dropped first, or the next flush would write them straight
-    /// back; every flush cut before the reset has already run, so all of them predate it. A failure
-    /// is logged ungated: the player keeps the counts the reset was meant to clear.
+    /// Retry entries the reset covers are dropped first, or they would be written straight back; every flush cut
+    /// before the reset has already run, so all of them predate it. A clear that fails stays in the buffer ahead of
+    /// every count drained after it, so a retry takes away only what the player held before the reset, never what
+    /// they landed since.
     /// </remarks>
     private void Reset(ulong steamId, long? period)
     {
-        _retry.RemoveAll(delta => delta.SteamId == steamId && (period is null || delta.Period == period));
+        _retry.RemoveAll(change =>
+            change is Change.Add { Delta: var delta } && delta.SteamId == steamId && (period is null || delta.Period == period));
 
-        try
-        {
-            using var connection = _core.Database.GetConnection(_connectionName);
-            connection.Open();
-            using var transaction = connection.BeginTransaction();
-
-            if (period is { } current)
-                ResetPeriod(connection, transaction, steamId, current);
-            else
-                Execute(connection, transaction, $"DELETE FROM {_table} WHERE steam_id = @steam_id", steamId);
-
-            transaction.Commit();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Ranks_CustomCombos: could not clear the combo counts of reset player {SteamId}.", steamId);
-        }
+        Commit([new Change.Reset(steamId, period)]);
     }
 
     /// <summary>Takes one period's counts off the lifetime totals, then deletes that period's rows.</summary>
@@ -324,33 +394,23 @@ internal sealed class Writer
         command.ExecuteNonQuery();
     }
 
-    /// <remarks>
-    /// Retry entries for these players go first, or a retried write would recreate their rows. A
-    /// failure is logged ungated.
-    /// </remarks>
+    /// <remarks>Retry entries for these players go first, or a retried write would recreate their rows.</remarks>
     private void Purge(HashSet<ulong> steamIds)
     {
-        _retry.RemoveAll(delta => steamIds.Contains(delta.SteamId));
+        _retry.RemoveAll(change => change is Change.Add { Delta: var delta } && steamIds.Contains(delta.SteamId));
 
-        try
+        Commit([new Change.Purge(steamIds)]);
+    }
+
+    /// <summary>Deletes every row of the purged players from both tables.</summary>
+    private void Purge(IDbConnection connection, IDbTransaction transaction, HashSet<ulong> steamIds)
+    {
+        foreach (var table in (ReadOnlySpan<string>)[_table, _periodTable])
         {
-            using var connection = _core.Database.GetConnection(_connectionName);
-            connection.Open();
-            using var transaction = connection.BeginTransaction();
+            var sql = $"DELETE FROM {table} WHERE steam_id = @steam_id";
 
-            foreach (var table in (ReadOnlySpan<string>)[_table, _periodTable])
-            {
-                var sql = $"DELETE FROM {table} WHERE steam_id = @steam_id";
-
-                foreach (var steamId in steamIds)
-                    Execute(connection, transaction, sql, steamId);
-            }
-
-            transaction.Commit();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Ranks_CustomCombos: failed to sweep {Count} purged player(s).", steamIds.Count);
+            foreach (var steamId in steamIds)
+                Execute(connection, transaction, sql, steamId);
         }
     }
 
@@ -399,5 +459,22 @@ internal sealed class Writer
         parameter.ParameterName = name;
         parameter.Value = value;
         command.Parameters.Add(parameter);
+    }
+
+    /// <summary>One queued change to this module's rows: a drained count, a core reset, or a purge.</summary>
+    /// <remarks>The retry buffer holds these in queue order, so a failed reset or purge is retried where it was queued.</remarks>
+    private abstract record Change
+    {
+        /// <summary>How many times this change's own statements have failed, transient failures aside; counted for a reset or a purge only.</summary>
+        public int Failures { get; set; }
+
+        /// <summary>A count added to the lifetime row, and to its period's row when it carries one.</summary>
+        public sealed record Add(ComboDelta Delta) : Change;
+
+        /// <summary>A core reset: one period's counts cleared and taken off the lifetime totals, or every lifetime row while periods are off.</summary>
+        public sealed record Reset(ulong SteamId, long? Period) : Change;
+
+        /// <summary>Purged players, deleted from both tables.</summary>
+        public sealed record Purge(HashSet<ulong> SteamIds) : Change;
     }
 }

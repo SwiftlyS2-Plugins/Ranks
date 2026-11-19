@@ -81,6 +81,8 @@ name. `_api.PointsChanged -= handler` in `Unload` is the classic survivor.
 | `Load` | config, game-event handlers, `Core.Registrator.Register(collector)`, core-event subscriptions, flush timer |
 | `UseSharedInterface` | acquire the API through the bridge; `RegisterMigrations(assembly)` |
 | `OnAllPluginsLoaded` | if `Ranks` is absent, log one ungated warning and stay idle |
+| core's `PlayerDataLoaded` | start the session of a player whose SteamID still read 0 when they were put in server (§2.5) |
+| core's `MaintenanceDue` | the orphan reconcile, once per load (§8.1) |
 | `Unload` | final flush, then unwire |
 
 `RegisterMigrations` goes in the handshake, not `Load` — there is no API yet in
@@ -99,11 +101,39 @@ Core.Registrator.Register(_collector);   // exactly once
 Registering twice double-counts every shot. Signatures must match the expected
 delegate exactly or the method is silently skipped.
 
-### 2.4 Hot reload
+### 2.4 Loading into a running server
 
-`Load(hotReload: true)` runs with players connected. Re-adopt them from
-`Core.PlayerManager`, filtering `IsFakeClient`, rather than waiting for a
-steam-authorize event that already fired.
+A reload runs with players connected. Re-adopt them from `Core.PlayerManager`,
+filtering `IsFakeClient`, rather than waiting for a steam-authorize event that
+already fired. "Running server" is `hotReload` or a map being up: SwiftlyS2's
+plugin API passes `hotReload: false` on a running server (implementation guide
+§2.4). A plugin-API load landing between maps may find no map and adopt nobody,
+which costs nothing: every player is put in server again as that map loads.
+
+The pass runs on the game thread — at once from a console load, on the next tick
+when `Load` is off it. SwiftlyS2's file watcher runs `Load` on a pool thread, where
+a player who leaves mid-loop throws on the next read of them, out of `Load`, and
+every slot races the game thread's handlers. It opens a session only for a slot that
+has none, so one put-in-server or `PlayerDataLoaded` opened before that tick keeps
+its deltas.
+
+### 2.5 A SteamID that reads 0
+
+Under SwiftlyS2's strict Steam authorization `IPlayer.SteamID` reads 0 until Steam
+has confirmed the player; the default flexible mode returns it at once. A session
+opened then would file every shot, hit and kill under `steam_id` 0 — one row shared
+by everyone Steam confirmed late — so adoption, at put-in-server and on a load into
+a running server alike, skips a SteamID of 0.
+
+Core loads a player only once it has their SteamID, so its `PlayerDataLoaded` is the
+first moment theirs is known. The module's override hands the SteamID to the plugin,
+which finds the connected, authorized non-bot holding it and opens their session —
+unless their slot already has one: core raises the event again on a reconnect and
+after a core reload, and a replaced session would drop its unflushed deltas. What
+the player did before that goes unrecorded, as it does in core.
+
+Releases before 1.1.4 opened the session at 0 and wrote such rows. Core never keeps
+a `steam_id` 0 row, so the orphan reconcile (§8.1) removes them.
 
 ---
 
@@ -241,9 +271,29 @@ concatenation.
 
 ### 4.3 Failure handling
 
-A failed flush must not lose the deltas. The writer owns a retry buffer and
-merges the failed batch back into it **off-thread** — never into the live
-session objects, which belong to the game thread (§5).
+A failed write must not lose anything. The writer owns a retry buffer of **changes**
+— a delta, a reset (§8.2) or a purge (§8) — kept in the order they were queued, and
+every queued write applies the whole buffer, then its own change, in one
+transaction. A failure rolls all of it back and keeps all of it, **off-thread** —
+never in the live session objects, which belong to the game thread (§5). Nothing is
+ever reordered: a reset that failed stays ahead of every delta cut after it, so a
+retry clears what the player held before the reset and keeps what they earned since.
+
+A reset or purge the database can never apply — no `DELETE` permission, a period
+table that was never created — would hold every later write back for the rest of the
+load. So the failure is charged to the change whose own statement threw, and a reset
+or purge charged three times is dropped, logged at `Error` once, and the buffer
+behind it is written straight away. Two kinds of failure are charged to nobody: one
+the driver marks transient (`DbException.IsTransient`, on the exception or any it
+wraps), and anything thrown outside the change's own statements — opening, beginning
+or committing the transaction, or another change. So connection failures, deadlocks,
+lock waits and timeouts the driver marks transient never drop one. That matters on
+PostgreSQL in particular: Npgsql sends `BEGIN` with the first statement, so a pooled
+connection that died idle fails at the change's own statement. Drivers differ in what
+they mark: Npgsql marks lost connections, deadlocks, and lock and command timeouts;
+MySqlConnector marks deadlocks and InnoDB lock-wait timeouts, but not a connection
+lost mid-statement or its own command timeout; System.Data.SQLite marks nothing. A
+delta is never given up on: it is kept until it is written.
 
 Log at `Error` with the exception object; this is a data-loss path and is not
 gated behind `DetailedLogging`.
@@ -417,8 +467,9 @@ on a busy 20-player server. It does one slot lookup, one dictionary lookup and
 one increment. No allocation, no logging on the success path, no database.
 
 A bot never *owns* a row: it gets no `SessionStats` at adoption, so `_slots[slot]`
-is null and every handler returns on the null check it already has. A bot as the
-*counterparty* is a separate question, handled per event below.
+is null and every handler returns on the null check it already has — as it does for
+a player whose SteamID still reads 0 (§2.5). A bot as the *counterparty* is a
+separate question, handled per event below.
 
 ### 5.2 The guards
 
@@ -484,7 +535,7 @@ protected override void OnCoreReady()
 }
 ```
 
-Ungated by `DetailedLogging`: it fires once, and it is the only signal between a
+Ungated by `DetailedLogging`: it fires once per load of Ranks, and it is the only signal between a
 misconfigured server and a module that looks broken. It **warns rather than
 auto-corrects** — an operator may run FFA and still not want friendly fire
 counted, and silently overriding their config would be the worse surprise. There
@@ -580,7 +631,9 @@ api.PlayersPurged += ids => DeleteRowsAsync(ids);
 Delete from all six tables — all time and every period — in one queued transaction.
 Core has already removed its own rows by the time this fires, so the module must not
 expect to look the player up. A purge takes past periods too, as it does in core
-(FR-DB-08).
+(FR-DB-08), and deletes from the period tables even with seasons off, so one that is
+missing fails every purge; a failed purge is retried like any write and dropped on
+the third failure of its own statements the driver does not mark transient (§4.3).
 
 ### 8.1 Orphans from a purge the module missed
 
@@ -589,8 +642,8 @@ an operator removing it for a map cycle, a failed load, a staged upgrade — tho
 rows are never swept and the table grows without bound. Nothing else will ever
 collect them.
 
-So the module reconciles once at `Load(hotReload: false)`, matching FR-DB-09's
-"heavy work on a cold start only" rule:
+So the module reconciles once per load, in core's maintenance window, matching
+FR-DB-09's rule that heavy work runs only where no player can feel it:
 
 ```sql
 DELETE FROM {weapon_stats}
@@ -601,11 +654,19 @@ Both names come from `ResolveTableName`, so this works under any affix. It is
 safe to depend on core's table here: FR-DB-04 fixes `ranks_players` as a closed,
 known schema, which makes it a contract rather than an implementation detail.
 The same statement runs against all six tables; every player core keeps has a
-`ranks_players` row whatever periods they hold.
+`ranks_players` row whatever periods they hold — and none at `steam_id` 0, so this
+also removes rows releases before 1.1.4 filed there (§2.5).
 
-Skipped on hot reload, and skipped entirely if the probe in guide §4.6 reported
-core's tables unreadable — deleting against a half-broken schema is worse than
-leaving orphans.
+It runs from core's `MaintenanceDue`, never from a bind, a ready check or
+`OnAllPluginsLoaded`. Core raises that after the pass a server start forces and
+otherwise only after a pass on an empty server, so the sweep needs no running-server
+check of its own: at a start it runs straight after startup, and a module bound to
+Ranks only on a running server waits for the next quiet window — at core's default
+`Database.MaintenanceIntervalHours` of 0, the next start. The handler only queues the
+delete on the writer, since core does not wait for subscribers.
+
+Skipped entirely if core could not resolve its table — deleting against a
+half-broken schema is worse than leaving orphans.
 
 ### 8.2 Resets
 
@@ -620,8 +681,11 @@ drops the player's retry entries for what it wipes, then, in one transaction:
 | on | read the player's rows for that period from the three per-period tables; `UPDATE` each matching all-time row by `CASE WHEN col > @col THEN col - @col ELSE 0 END`; `DELETE` all-time rows the subtraction left at zero; `DELETE` the period's rows |
 
 Retry entries stamped with a closed period stay — core keeps past periods through a
-reset. A failed reset is logged and not retried: a later attempt would also take away
-whatever the player has earned since.
+reset. A reset that fails stays in the retry buffer where it was queued (§4.3) and is
+applied again with the next write, still ahead of every delta cut after it — so the
+retry takes away only what the player held before the reset, never what they earned
+since. A third failure of its own statements the driver does not mark transient drops
+it (§4.3); the entries it dropped when queued stay dropped.
 
 ---
 
@@ -674,6 +738,13 @@ are `[Obsolete]` and throw at runtime.
 - [ ] Starting with core in FFA mode and `CountFriendlyFire = false` logs the
       mismatch warning exactly once
 - [ ] Deltas survive a failed flush and land on the retry
+- [ ] A reset that fails is retried with the next write, ahead of the deltas cut
+      after it, which survive it
+- [ ] A reset or purge the database refuses three times is dropped with one `Error`,
+      and the deltas behind it land; a failure the driver marks transient drops nothing
+      however many commits it lasts — on PostgreSQL, a pooled connection that died idle
+- [ ] With SwiftlyS2's strict Steam authorization, a player Steam confirms after they
+      are put in server records under their own SteamID, never under `0`
 - [ ] Command names grepped against sibling plugins
 - [ ] No identifier named `rank`
 - [ ] With core's seasons off (`VirtualPurgeMode = 0`, `VirtualPurgeDays = 0`), the three `_period` tables stay

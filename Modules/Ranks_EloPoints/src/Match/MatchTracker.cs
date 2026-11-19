@@ -32,8 +32,11 @@ internal sealed class MatchTracker
     private bool _settled;
     private bool _playGateUnsupported;
 
-    /// <summary>True once a period boundary cut through the open match: nothing more of it is rated.</summary>
-    /// <remarks>Cleared when that match settles, restarts or the map changes, whichever comes first.</remarks>
+    /// <summary>True once the open match can no longer be rated whole: nothing more of it is rated.</summary>
+    /// <remarks>
+    /// Set when a period boundary cuts through it, or when this module loads into it. Cleared when that match settles,
+    /// restarts or the map changes, whichever comes first.
+    /// </remarks>
     private bool _voided;
 
     public MatchTracker(ISwiftlyCore core, RanksBridge bridge, RatingStore store, EloConfig config, ILogger logger)
@@ -82,22 +85,87 @@ internal sealed class MatchTracker
         if (_sessions.TryGetValue(steamId, out var session)) session.Present = false;
     }
 
-    /// <summary>Captures the match-start counters for a player whose record just became resident.</summary>
+    /// <summary>Starts a session for everyone already connected, for a module loaded into a running server.</summary>
+    /// <remarks>
+    /// A match past its first round stays unrated: its earlier rounds were never accrued, and rebuilding them from the
+    /// scoreline would mean inventing the per-round expectations. The players are rated from the next match. Anyone
+    /// adopted since is left alone, so a move to spectator in between still counts. Game thread only.
+    /// </remarks>
+    public void AdoptConnectedPlayers()
+    {
+        if (TryReadMatch(out var match) && match.RoundsPlayed > 0) VoidMatchInProgress(match.RoundsPlayed);
+
+        foreach (var player in _core.PlayerManager.GetAllPlayers())
+            if (!player.IsFakeClient && !_sessions.ContainsKey(player.SteamID))
+                AdoptResident(player);
+    }
+
+    /// <summary>Adopts a player already connected, taking their match-start counters from core's record at once.</summary>
+    /// <remarks>
+    /// Their <c>PlayerDataLoaded</c> fired before this module bound, so nothing else captures them, and a session
+    /// without them scores at the median however the match goes. Still null for a record core is loading, whose
+    /// <c>PlayerDataLoaded</c> is yet to come and fills them.
+    /// </remarks>
+    private void AdoptResident(IPlayer player)
+    {
+        Adopt(player);
+
+        if (_sessions.TryGetValue(player.SteamID, out var session))
+            session.StartCounters ??= _bridge.GetCounters(player.SteamID);
+    }
+
+    /// <summary>Leaves the rest of a match this module joined part-way unrated.</summary>
+    /// <remarks>
+    /// The round count is taken as the restart baseline, so a restart before the next round end still starts a fresh,
+    /// rated match rather than staying void.
+    /// </remarks>
+    private void VoidMatchInProgress(int roundsPlayed)
+    {
+        _voided = true;
+        _lastRoundsPlayed = roundsPlayed;
+
+        if (_config.General.DetailedLogging)
+            _logger.LogInformation("Ranks_EloPoints: loaded mid-match, so the rest of this match is unrated.");
+    }
+
+    /// <summary>Captures the match-start counters for a player whose record just became resident, starting their session first if they have none.</summary>
     /// <remarks>
     /// The only moment a mid-match joiner's counters are guaranteed readable. Without it they
-    /// would be scored against a zero baseline, which reads as a perfect game.
+    /// would be scored against a zero baseline, which reads as a perfect game. Core's points — StartPoints when those
+    /// are 0 — stand in for a rating still being read, marked so the stored one replaces them when it lands: they are
+    /// rounded, and may hold points another plugin gave, which the next settle would carry into the rating.
     /// </remarks>
     public void OnPlayerDataLoaded(ulong steamId, in PerfCounters counters, int corePoints)
     {
-        if (!_sessions.TryGetValue(steamId, out var session)) return;
+        if (SessionFor(steamId) is not { } session) return;
 
         session.StartCounters ??= counters;
 
-        if (!session.RatingResolved && corePoints > 0)
-        {
-            session.Rating = corePoints;
-            session.RatingResolved = true;
-        }
+        if (!session.RatingResolved) SeedFromCore(session, corePoints);
+    }
+
+    /// <summary>The player's session, started now for a player who entered without one — before Steam or Ranks could key it.</summary>
+    /// <remarks>
+    /// Steam can authorize a player after they are put in server, and <see cref="Adopt"/> passes over a SteamID of 0;
+    /// it passes over everyone while Ranks is not bound, too. Core's own load waits for that authorization, and a Ranks
+    /// loaded or reloaded on a running server loads everyone connected, so its <c>PlayerDataLoaded</c> is the first
+    /// moment to key them. Mid-match they count as having joined late.
+    /// </remarks>
+    private MatchSession? SessionFor(ulong steamId)
+    {
+        if (!_sessions.ContainsKey(steamId)
+            && _core.PlayerManager.GetPlayerFromSteamId(steamId, allowUnauthorized: false) is { IsFakeClient: false } player)
+            Adopt(player);
+
+        return _sessions.GetValueOrDefault(steamId);
+    }
+
+    /// <summary>Stands core's points — StartPoints when those are 0 — in for a rating not resolved yet, until the stored one lands.</summary>
+    private void SeedFromCore(MatchSession session, int corePoints)
+    {
+        session.Rating = corePoints > 0 ? corePoints : StartPoints();
+        session.RatingResolved = true;
+        session.RatingSeededFromCore = true;
     }
 
     /// <summary>Throws away an unfinished match. Nothing was written, so there is nothing to undo.</summary>
@@ -144,8 +212,54 @@ internal sealed class MatchTracker
 
         Rebaseline(session);
         session.RatingGeneration++;
-        session.Rating = StartingRating(steamId);
+        SetRating(session, StartingRating(steamId));
+    }
+
+    /// <summary>Takes an admin's change to a player's points into their rating for <paramref name="period"/>, so the next resync and settle keep it.</summary>
+    /// <remarks>
+    /// <c>!setpoints</c> names the rating outright. A give or a take moves the known rating by what core applied
+    /// after its floor, which keeps the rating's fraction. While neither the cache nor a resolved session knows
+    /// the rating, a give or a take is applied on top of core's points instead, so a non-admin change already in
+    /// them can stick. Every other point change is left to be overwritten.
+    /// </remarks>
+    public void AdoptAdminChange(in AdminPointChange change, long period, int minPoints)
+    {
+        var rating = change.Absolute
+            ? change.NewPoints
+            : Math.Max((KnownRating(change.SteamId, period) ?? change.OldPoints) + change.Delta, minPoints);
+
+        _ = _store.AdjustAsync(change.SteamId, period, rating);
+        Reseat(change.SteamId, rating);
+
+        if (_config.General.DetailedLogging)
+            _logger.LogInformation("Ranks_EloPoints: {SteamId} rating set to {Rating:N2} by an admin.", change.SteamId, rating);
+    }
+
+    /// <summary>The player's rating for <paramref name="period"/> as far as this module knows, or null.</summary>
+    /// <remarks>The store first: it holds every rating read, settled or adjusted for the period, the newest included.</remarks>
+    private double? KnownRating(ulong steamId, long period)
+    {
+        if (_store.TryGetCached(steamId, period, out var cached)) return cached;
+
+        return _sessions.TryGetValue(steamId, out var session) && session.RatingResolved ? session.Rating : null;
+    }
+
+    /// <summary>Puts a connected player's session on <paramref name="rating"/>, keeping the rounds it has accrued.</summary>
+    /// <remarks>Bumps the generation like a re-seed, so a read begun before it cannot land the old rating on top.</remarks>
+    private void Reseat(ulong steamId, double rating)
+    {
+        if (!_sessions.TryGetValue(steamId, out var session)) return;
+
+        session.RatingGeneration++;
+        SetRating(session, rating);
+    }
+
+    /// <summary>Puts a session on a rating that is the player's own, ending any stand-in from core's points.</summary>
+    private static void SetRating(MatchSession session, double rating)
+    {
+        session.Rating = rating;
         session.RatingResolved = true;
+        session.RatingSeededFromCore = false;
     }
 
     /// <summary>Zeroes every accrual and re-baselines the players still here.</summary>
@@ -153,7 +267,8 @@ internal sealed class MatchTracker
     /// Replaces clearing the dictionary, which looked equivalent and was not: nothing re-adds a
     /// session for an already-connected player, so after a knife-round restart — or after any
     /// settle — every connected player silently stopped accruing and the whole next match went
-    /// unrated. Adopt only runs on connect and on hot reload.
+    /// unrated. Adopt only runs on connect, when core loads a player's record, and once after this
+    /// module loads into a running server.
     ///
     /// Re-capturing StartCounters is the other half: they are a match baseline, and the ones taken
     /// at connect would make a second match's performance percentile span both.
@@ -367,7 +482,19 @@ internal sealed class MatchTracker
         }
 
         _ = _store.CommitAsync(writes);
+        CarryRatingsForward(rated, writes);
         StartFreshMatch();
+    }
+
+    /// <summary>Moves every rated session onto the rating it just settled at, so a player who stays is rated from it next match.</summary>
+    /// <remarks>
+    /// After the whole loop, never inside it: Classic scores each player against <see cref="TeamAverages"/>, which
+    /// reads every session's rating, so a write mid-loop would rate later players against teammates already moved.
+    /// <paramref name="writes"/> holds one entry per rated session, in the same order.
+    /// </remarks>
+    private static void CarryRatingsForward(MatchSession[] rated, List<RatingWrite> writes)
+    {
+        for (var i = 0; i < rated.Length; i++) SetRating(rated[i], writes[i].Rating);
     }
 
     /// <summary>Every session that played a round and knows its rating; the rest go unrated rather than rated from a guess.</summary>
@@ -510,48 +637,110 @@ internal sealed class MatchTracker
 
     /// <summary>Resolves the stored rating for <paramref name="period"/>, falling back to core's points and then StartPoints.</summary>
     private void ResolveRating(MatchSession session, long period) =>
-        _ = ResolveRatingAsync(session, period, session.RatingGeneration);
+        _ = ResolveRatingAsync(session, period, session.RatingGeneration, attempt: 0);
 
     /// <summary>Forgets a session's rating and resolves it again for <paramref name="period"/>.</summary>
     private void Reseed(MatchSession session, long period)
     {
         session.RatingGeneration++;
         session.RatingResolved = false;
+        session.RatingSeededFromCore = false;
 
         ResolveRating(session, period);
     }
 
-    private async Task ResolveRatingAsync(MatchSession session, long period, int generation)
+    /// <param name="attempt">0 for the first read of this generation, then one more for each retry after a failure.</param>
+    private async Task ResolveRatingAsync(MatchSession session, long period, int generation, int attempt)
     {
-        double? stored = null;
+        RatingRead read;
 
         try
         {
-            stored = await _store.ReadAsync(session.SteamId, period).ConfigureAwait(false);
+            read = await _store.ReadAsync(session.SteamId, period).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Ranks_EloPoints: could not read a starting rating for {SteamId}.", session.SteamId);
+            read = RatingRead.Failed(ex);
         }
+
+        if (read.Error is { } error) ReportFailedRead(error, session.SteamId, attempt);
 
         // Back onto the game thread before touching anything: the session, core's API and the
         // registry are all game-thread state, and the continuation runs on the thread pool.
-        _core.Scheduler.NextTick(() => ApplyResolvedRating(session, generation, stored));
+        _core.Scheduler.NextTick(() => ApplyResolvedRating(session, period, generation, read, attempt));
+    }
+
+    /// <summary>Logs a failed rating read: a player's first at Error, the retries after it only with DetailedLogging.</summary>
+    /// <remarks>Ungated at Error: the player is about to be rated from a stand-in, which is worth seeing once rather than once per retry.</remarks>
+    private void ReportFailedRead(Exception error, ulong steamId, int attempt)
+    {
+        if (attempt == 0) _logger.LogError(error, "Ranks_EloPoints: could not read the stored rating for {SteamId}.", steamId);
+        else if (_config.General.DetailedLogging) _logger.LogDebug(error, "Ranks_EloPoints: reading the stored rating for {SteamId} failed again.", steamId);
     }
 
     /// <remarks>
     /// The session may have been cleared by a restart or a map change while the read ran, or seeded
     /// again by a new period or a reset — a read begun before either holds a rating that no longer
-    /// applies.
+    /// applies. A stored rating replaces core's rounded points standing in for it, but never a rating a
+    /// settle has moved on since. Finding none fills only a session nothing has resolved, and only once core holds the
+    /// player's record: before that their points read 0, and <c>PlayerDataLoaded</c> seeds the session instead. A
+    /// failed read is not finding none: core's points only stand in, and the read is tried again.
     /// </remarks>
-    private void ApplyResolvedRating(MatchSession session, int generation, double? stored)
+    private void ApplyResolvedRating(MatchSession session, long period, int generation, RatingRead read, int attempt)
     {
-        if (!_sessions.TryGetValue(session.SteamId, out var live) || !ReferenceEquals(live, session)) return;
-        if (session.RatingResolved || session.RatingGeneration != generation) return;
+        if (!IsCurrent(session, generation)) return;
 
-        session.Rating = stored ?? StartingRating(session.SteamId);
-        session.RatingResolved = true;
+        if (read.Rating is { } rating)
+        {
+            if (TakesStoredRating(session)) SetRating(session, rating);
+            return;
+        }
+
+        if (read.Error is not null)
+        {
+            StandInForUnreadRating(session);
+            RetryReadLater(session, period, generation, attempt);
+            return;
+        }
+
+        if (!session.RatingResolved && CoreHolds(session.SteamId)) SetRating(session, StartingRating(session.SteamId));
     }
+
+    /// <summary>Whether <paramref name="session"/> is still the player's and still on the rating generation a read began in.</summary>
+    private bool IsCurrent(MatchSession session, int generation) =>
+        _sessions.TryGetValue(session.SteamId, out var live) && ReferenceEquals(live, session) && session.RatingGeneration == generation;
+
+    /// <summary>Whether a stored rating would still replace what the session holds: nothing yet, or core's points standing in.</summary>
+    private static bool TakesStoredRating(MatchSession session) => !session.RatingResolved || session.RatingSeededFromCore;
+
+    /// <summary>Stands core's points in for a rating a failed read could not reach, so the player counts in team averages meanwhile.</summary>
+    /// <remarks>
+    /// Marked as a stand-in, so a retried read still replaces it. Only once core holds the player's record: before that
+    /// their points read 0, and <c>PlayerDataLoaded</c> seeds the session instead.
+    /// </remarks>
+    private void StandInForUnreadRating(MatchSession session)
+    {
+        if (!session.RatingResolved && CoreHolds(session.SteamId)) SeedFromCore(session, _bridge.GetPoints(session.SteamId) ?? 0);
+    }
+
+    /// <summary>Reads the stored rating again after a failed read, up to <see cref="ReadRetryDelaysSeconds"/>'s length, further apart each time.</summary>
+    /// <remarks>
+    /// Only for the generation the failed read began in, and only while a stored rating would still be taken, so a
+    /// retry never lands on a new period, a reset, an admin's change or a settle.
+    /// </remarks>
+    private void RetryReadLater(MatchSession session, long period, int generation, int attempt)
+    {
+        if (attempt >= ReadRetryDelaysSeconds.Length) return;
+
+        _core.Scheduler.DelayBySeconds(ReadRetryDelaysSeconds[attempt], () =>
+        {
+            if (IsCurrent(session, generation) && TakesStoredRating(session))
+                _ = ResolveRatingAsync(session, period, generation, attempt + 1);
+        });
+    }
+
+    /// <summary>Whether core has the player's record resident, so the points it reports are theirs.</summary>
+    private bool CoreHolds(ulong steamId) => _bridge.IsAvailable && _bridge.IsLoaded(steamId);
 
     /// <summary>The rating a player with none in the current period starts from: core's points, else StartPoints.</summary>
     /// <remarks>
@@ -565,8 +754,11 @@ internal sealed class MatchTracker
 
         var corePoints = _bridge.GetPoints(steamId) ?? 0;
 
-        return corePoints > 0 ? corePoints : _bridge.GetSettings()?.StartPoints ?? DefaultStartRating;
+        return corePoints > 0 ? corePoints : StartPoints();
     }
+
+    /// <summary>Core's <c>Rank.StartPoints</c>, or the fallback while core is unreachable.</summary>
+    private int StartPoints() => _bridge.IsAvailable ? _bridge.GetSettings()?.StartPoints ?? DefaultStartRating : DefaultStartRating;
 
     private int ResolveMatchRounds()
     {
@@ -650,6 +842,14 @@ internal sealed class MatchTracker
 
     /// <summary>Used only when core is unreachable at the moment a rating has to be seeded.</summary>
     private const int DefaultStartRating = 1000;
+
+    /// <summary>How long each retry of a failed rating read waits.</summary>
+    /// <remarks>
+    /// Rides out a database restart or a module migration still running, and is over about a minute after the player
+    /// joined, before most matches settle the stand-in into their rating. A database that stays down costs one error per
+    /// player in the log.
+    /// </remarks>
+    private static readonly float[] ReadRetryDelaysSeconds = [5f, 15f, 45f];
 
     private readonly record struct MatchSnapshot(int RoundsPlayed, GamePhase Phase, int CtScore, int TScore);
 }

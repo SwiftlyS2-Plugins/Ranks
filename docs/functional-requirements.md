@@ -39,14 +39,15 @@ exposes all of that to other plugins through a shared API.
 
 **The design rule that shapes everything else: the dependency runs one way.**
 Core is a complete, standalone plugin that behaves identically whether zero
-modules or ten are installed. It never calls module code, never holds a
-module-supplied delegate, and never gains a config key because something was
-installed. Modules depend on core; core does not know they exist.
+modules or ten are installed, apart from what a module asks of it through the API.
+It never calls module code, never holds a module-supplied delegate, and never
+gains a config key because something was installed. Modules depend on core; core
+does not know they exist.
 
 Extensibility therefore comes from core publishing **facts and operations** —
-read a record, change points, persist, observe, read the operator's settings —
-and modules composing on top of them. A module that wants different scoring
-ships its own numbers rather than injecting them into core's.
+read a record, change points, persist, observe, read the operator's settings,
+claim scoring — and modules composing on top of them. A module that wants
+different scoring ships its own numbers rather than injecting them into core's.
 
 ---
 
@@ -242,6 +243,37 @@ and every module share the connection named by `Database.Connection`
 it registers its migration assembly with core (FR-API-06) and core runs it,
 against a ledger core derives.
 
+**When a registered module migrates.** At server start, once every plugin has
+loaded: SwiftlyS2 raises `OnAllPluginsLoaded` there and nowhere else. Past that
+point nothing would drain a queue, so a module loaded or updated on a running
+server — and every module after core itself is loaded into a running server —
+migrates as it registers, in the background: its registration call runs in the
+module's shared-interface handshake, which a console load runs on the game thread,
+so core only queues the run there and returns. Runs go one module at a time, and
+that call never throws, since SwiftlyS2 does not guard the handshake: a failing
+module is logged and isolated exactly as requirement 9 below asks. Each
+`(assembly, pluginId)` migrates once per load of core; a reloaded core keeps no
+record of the previous one's runs, and an up-to-date ledger applies nothing.
+A core that found no map at load but still has no `OnAllPluginsLoaded` by its first
+tick was loaded into a running server after all (FR-DB-09), and switches to the
+same background path then, starting with what is already queued.
+Core's own schema migrates on the loading thread, in `Load`, because core cannot
+serve until it knows that schema is usable. Unloading core drops the module runs not
+yet started and waits — bounded, like the final flush — for the one already running:
+SwiftlyS2 gives every load of core its own load context, so a console reload within
+about a second of the previous load would otherwise migrate that module twice at once.
+
+Until a module's background run finishes — under a second for an up-to-date
+ledger — a table it creates may not exist yet. A write landing in that window
+fails, is logged at `Error`, and is replayed from the module's retry buffer with
+its next write, so nothing is lost; only a reset or purge whose own statements
+have failed three times for a reason the driver does not mark transient is
+dropped, with its own `Error`. A read fails too:
+EloPoints logs the first failure for a player at `Error`, stands core's points in
+for their rating and reads it again a few times over the next minute; a stats menu
+logs it and shows its error line; the WeaponStats and CustomCombos APIs throw to
+their caller.
+
 > **Why core owns the runner.** Affix application is the whole point of
 > FR-DB-03, and a module that writes `Create.Table("weapon_stats")` produces an
 > unprefixed table on a prefixed server. FluentMigrator offers no table-name
@@ -381,8 +413,13 @@ connect" into one line at boot.
 | Load fails | Player is **not** tracked, and the load is retried. Never substitute a fresh empty record — the next absolute save would wipe the real row. |
 | Periodic | Save pass on a configurable interval (`Database.SaveIntervalSeconds`, default `300`). |
 | Round end / map end | Save pass. |
-| Player disconnects | Record stays resident until fully saved; a reconnect adopts it. The disconnect handler must not gate on pawn validity. |
-| Plugin unload | Blocking flush with a bounded budget (~8 s). |
+| Player disconnects | Record stays resident until the newest write queued for it commits its latest values — whichever write that is — and is then dropped; a reconnect before that adopts it. The disconnect handler must not gate on pawn validity. |
+| Plugin unload | Blocking flush with a bounded budget (~8 s), then a wait of the same bound for a module migration still running (FR-DB-05). |
+
+**A load binds to where its owner is when it lands.** A player may leave, or
+reconnect into another slot, while their record loads: it binds to the slot they
+hold by then, or to none, so a slot's next occupant is never credited to someone
+who left.
 
 **Playtime is banked, not written continuously.** A connected player's running
 session is added to `playtime` on the game thread before every save pass, at
@@ -424,14 +461,21 @@ them**. Three rules, in order of how often they fire:
 
 | Trigger | Runs? |
 |---|---|
-| `Load(hotReload: false)` | **Yes** — server startup, empty by definition |
-| `Load(hotReload: true)` | **No** — see below |
+| Server start | **Yes** — empty by definition |
+| A load into a running server — `sw plugins load` or `reload`, the file watcher, or SwiftlyS2's plugin API | **No** — see below |
 | Interval elapsed **and** server empty | Yes, only when opted in |
 
-**The `hotReload` skip is the load-bearing one.** A hot reload is how an operator
+**The running-server skip is the load-bearing one.** A reload is how an operator
 deploys a fix mid-session, so players *are* connected. Migrations may still run
 there — they are guarded and cost one metadata query once applied — but a purge
-or a month's roll-up is not a no-op and must not freeze a live server.
+or a month's roll-up is not a no-op and must not freeze a live server. The
+`hotReload` flag alone does not tell the two apart: SwiftlyS2's plugin API
+(`IPluginManager.LoadPlugin`, `ReloadPlugin`) passes `false` on a running server,
+so a running server is `hotReload` or a map being up — plugins load at server start
+before the first map. Finding no map is not proof either: a plugin-API load can land
+between maps, where nothing shows the engine's globals stay readable. So the
+server-start pass waits for `OnAllPluginsLoaded`, which SwiftlyS2 raises only as it
+starts, and such a load never sees it.
 
 **`Database.MaintenanceIntervalHours`** (default `0` = load-only) covers servers
 that are never restarted. Non-zero enables a single check at round end: if the
@@ -531,9 +575,10 @@ Menus: FR-CMD-04. API: FR-API-13.
 ### FR-PTS-00 — Core ranking logic toggle
 
 `Rank.UseCoreRankingLogic` (default `true`) decides whether core's scoring runs
-at all.
+at all — unless a rating module holds the scoring claim (FR-API-14), which puts
+core in the `false` column below whatever the setting says.
 
-| | `true` (default) | `false` |
+| | `true` (default) | `false`, or a module holding the scoring claim |
 |---|---|---|
 | Core's own handlers award points | yes | **no** |
 | Core's gates, multipliers and dynamic kill/death scaling | applied to core's awards | **inert — nothing in core computes a multiplier** |
@@ -546,7 +591,9 @@ Switching it off turns `Ranks` into a **host**. It still owns the record cache,
 the schema and writer, the rank ladder, the scoreboard, the commands and menus
 and the whole API — it simply stops deciding what a kill is worth. A rating
 module (FR-MOD-05) becomes the scoring authority and writes the value with
-`SetPoints`.
+`SetPoints`. It takes that role with a scoring claim, so an operator who installs
+one does not also have to find and flip this setting; core never rewrites the
+file, and `GetPointSettings` keeps reporting what the operator configured.
 
 **Everything downstream of a point value is muted with it.** Gates, the VIP
 multiplier and dynamic kill/death scaling exist to shape *core's* awards; with
@@ -582,27 +629,35 @@ those counters, and a rating module should not have to re-implement kill/death
 tracking merely because it owns the points. Points and statistics are
 separable; only points are switched off here.
 
-A `false` setting with no rating module installed leaves nobody awarding points,
-which looks exactly like a broken plugin. Core logs one `Warning` at
-`OnAllPluginsLoaded` naming the setting — unconditionally, because core has no
-registry of who is scoring and deliberately does not acquire one.
+A `false` setting with no module holding the scoring claim leaves nobody awarding
+points, which looks exactly like a broken plugin. Core logs one `Warning` at
+`OnAllPluginsLoaded` naming the setting — there, because a rating module claims
+from its handshake, which runs after core's `Load`. A load into a running server never
+reaches `OnAllPluginsLoaded`, so there core runs the same check a few seconds
+after `Load` instead. Its text allows for a rating module too old to claim. A
+claim granted over a `true` setting logs one `Warning` naming the module
+instead, since the log is the only place the override shows.
 
-> **Absolute writers must be exclusive. Additive writers compose.**
+> **Absolute writers must be exclusive. Additive writers compose — with core.**
 >
 > `SetPoints` is absolute — it replaces whatever was there, so two plugins doing
 > it fight and the last one at any instant wins. Exactly one absolute authority
-> may be active: `Ranks` core, or one rating module (FR-MOD-05), never two, and
-> never a rating module with `UseCoreRankingLogic` left `true`. This is an
-> **operator constraint stated in the documentation**, not something core
-> engineers around — core cannot detect the combination without tracking who is
-> scoring, which would invert the dependency.
+> may be active: `Ranks` core, or one rating module (FR-MOD-05), never two. The
+> scoring claim (FR-API-14) enforces the half core can see: while a module holds
+> it core awards nothing of its own, so a rating module beside
+> `UseCoreRankingLogic = true` is no longer two authorities, and a second module
+> asking for the claim is refused with an error naming both. What no claim can
+> stop is a plugin that never asks calling `SetPoints` — that stays an operator
+> constraint.
 >
 > `AddPoints` is relative and cannot lose anyone's work in either order, so
-> additive modules — `Ranks_CustomCombos` (FR-MOD-06) is the reference case —
-> coexist freely with whichever authority is active, and with each other. That
-> holds for `Ranks_CustomCombos` in its default mode; with `SuppressCoreAwards`
-> on it is deciding the award rather than adding to one, and stops being safe to
-> pair with an absolute authority.
+> additive modules coexist freely with core's scoring and with each other. Beside
+> a rating module they do not: it keeps its authoritative value in its own table
+> and writes it back over core's points, so points added beside it last only until
+> its next write. `Ranks_EloPoints` adopts core's admin commands into its rating
+> and nothing else. `Ranks_CustomCombos` (FR-MOD-06) pays through core's award
+> path (FR-API-11), so under a claim its combos are counted and pay nothing, with
+> or without `SuppressCoreAwards`.
 >
 > This is the rule that tells a module author which kind they are building.
 
@@ -703,8 +758,8 @@ statistics and then lose its points to a cache that expired between the two read
 statistics keep counting:
 
 - a configured point value of `0` (FR-PTS-02) — that is pricing;
-- `UseCoreRankingLogic = false` (FR-PTS-00) — scoring is handed to a rating module,
-  which rates only play core counted (FR-MOD-05);
+- `UseCoreRankingLogic = false`, or a module's scoring claim (FR-PTS-00) — scoring
+  is handed to a rating module, which rates only play core counted (FR-MOD-05);
 - a `PointsChanging` subscriber cancelling an award — that module's own policy;
 - a rating module's match that never finishes (a restart or a map change), which
   has no result to rate.
@@ -747,8 +802,8 @@ They are multiplied together, then the result is rounded once (FR-PTS-02 step 5)
 > with another plugin's grants, and still awards nothing until an operator
 > grants it — discoverable and fail-closed at the same time.
 
-**Both are inert when `UseCoreRankingLogic` is `false`** (FR-PTS-00), and
-neither ever applies to `AddPoints` or `SetPoints`.
+**Both are inert when `UseCoreRankingLogic` is `false` or a module holds the
+scoring claim** (FR-PTS-00), and neither ever applies to `AddPoints` or `SetPoints`.
 
 > **A module that wants a multiplier applies it itself.** A double-XP weekend
 > plugin computes its own value and calls `AddPoints`; a rating module reads
@@ -1288,6 +1343,13 @@ any notation, the id `status` prints (with or without `#`), or an `@` group. Onl
 group may resolve to several players: an ambiguous name is refused, never applied
 to everyone it matches.
 
+Each change is raised on `PointsChanged` with the reason `admin.set`, `admin.add`
+or `admin.subtract`. A rating module keys on those to take an admin's change into
+its own rating (FR-MOD-05 rule 9), so they are contract: renaming one silently
+turns every such change back into one the module overwrites. `!setpoints` to the
+total a player already has — after `Rank.MinPoints` — is raised too, with `Delta`
+0, because the rating behind that total may still differ from it.
+
 ### FR-CMD-04 — One menu tree, open to modules
 
 **Reversed in v1.1.** This requirement previously read *"Menus are core's own"*
@@ -1489,10 +1551,11 @@ and FR-MOD-06 keep their identifiers.
 ### FR-MOD-05 — Rating modules *(official)*
 
 Alternative rating systems are **separate plugins, never a mode enum inside
-core**. These are the **absolute** kind of module (FR-PTS-00): each one pairs
-with `Rank.UseCoreRankingLogic = false` so core stops scoring, the module
-becomes the sole scoring authority, and core continues to own persistence, the
-ladder, the scoreboard, commands and menus. At most one may be active.
+core**. These are the **absolute** kind of module (FR-PTS-00): each one claims
+scoring (FR-API-14) so core stops scoring whatever `Rank.UseCoreRankingLogic`
+says, the module becomes the sole scoring authority, and core continues to own
+persistence, the ladder, the scoreboard, commands and menus. At most one may be
+active.
 
 | Module | Models | Notes |
 |---|---|---|
@@ -1522,11 +1585,23 @@ Every rating module follows the same contract:
    round it accrues and adds no gate of its own. A rating withheld for play whose
    statistics core kept, or paid for play core left out, is exactly the split
    FR-PTS-03 forbids.
+8. Claims scoring with `ClaimScoring` from every handshake, through the interface
+   that handshake bound, and releases it in `Unload` (FR-API-14). Against a core
+   without the claim it falls back to warning the operator when
+   `UseCoreRankingLogic` is still `true`.
+9. Decides which other writes it keeps. Its next write replaces anything else
+   written to core's points, so it says what it adopts: `Ranks_EloPoints` adopts
+   core's admin commands — the reasons `admin.set`, `admin.add` and
+   `admin.subtract` on `PointsChanged` (FR-CMD-03) — and nothing else.
 
-> There is deliberately **no registration call.** Core does not track which
-> module is scoring, so it cannot name the active system in `!rank` or detect
-> two absolute authorities running at once — that is the documented operator
-> constraint in FR-PTS-00, and the price of keeping the dependency one-way.
+> **Reversed in v1.5.** This note read *"There is deliberately no registration
+> call. Core does not track which module is scoring, so it cannot name the active
+> system in `!rank` or detect two absolute authorities running at once."* That
+> left the one misconfiguration that silently produced nonsense — a rating module
+> beside `UseCoreRankingLogic = true` — to operators who had not read the setup
+> step. The scoring claim is that registration call. Core keeps the module's id, a
+> string, and calls nothing the module supplied, so the dependency still runs one
+> way; FR-API-14 has the detail.
 
 **A rating module owns its own precision.** Core's `points` is an `INT` (Q15),
 while Elo and HLstatsX deltas are fractional. A module therefore keeps its
@@ -1543,15 +1618,16 @@ catalogue cannot price (FR-PTS-09) — "a knife headshot is worth 50", "a triple
 kill with one grenade is worth 100".
 
 **It is additive by default** (FR-PTS-00). Core scoring stays on, the module never
-calls `SetPoints`, and it composes with whichever absolute authority is active: a
-server can run core scoring + combos, or `Ranks_EloPoints` + combos, with no
-configuration shared between them.
+calls `SetPoints`, and a matched combo pays on top of core's kill award. It pays only
+while core scores, because a claim is awarded through core's own pipeline
+(FR-API-11): beside a rating module that holds the scoring claim (FR-API-14) combos
+are still counted but pay nothing, and the module says so once at startup.
 
 **With `SuppressCoreAwards` enabled it stops being purely additive**, and that is a
 real trade rather than a setting: core must consult the module before awarding a
 kill (FR-API-11), so the module gains an ordering dependency on core that the
-default mode does not have. An operator running it this way alongside an absolute
-rating module has two authorities deciding one number, which nothing detects.
+default mode does not have. Beside a rating module holding the claim it suppresses
+nothing, since core is awarding nothing to suppress.
 
 Every kill produces an **attribute set**. Raw attributes are named for the
 `player_death` field they read, so an operator can check a name against an event
@@ -1743,6 +1819,15 @@ string? GetDesiredClanTag(ulong steamId);
 Every accessor is keyed on **SteamID64**, with `IPlayer` overloads for
 convenience. A disconnected-but-unsaved player must still resolve.
 
+**The two writes are safe from any thread.** `SetPoints` and `AddPoints` change a
+record core's game thread owns and redraw the scoreboard, so called off the game
+thread they run on its next tick instead — an `IPlayer` overload only while that
+player still holds their slot, since a departed player's `IPlayer` is disposed and
+throws. On the game thread nothing changes: they apply at once. A module reading
+the total straight after an off-thread call therefore still sees the old one, and
+`PointsChanged` and `RankChanged` follow on the game thread, as FR-API-04
+promises for every event.
+
 `GetDesiredClanTag` returns the tag core *would* write for that player, or
 `null` when `Scoreboard.Clantags` is off or the player is not loaded. It exists
 so a dedicated tag-arbiter plugin can take ownership of
@@ -1857,13 +1942,18 @@ gets several uncoordinated table scans instead of one quiet window.
 
 - It fires **after** core's own maintenance completes, so a slow module cannot
   delay core's purge, and the server is still empty when the module runs.
-- It fires **only** when core actually ran a pass — with
-  `Database.MaintenanceIntervalHours` at its `0` default, it never fires.
+- It fires once after the pass a server start forces, and after that only when a
+  later pass runs — on an empty server, every `Database.MaintenanceIntervalHours`
+  once that is above its `0` default. A load into a running server forces no pass,
+  so a module bound only then waits for the next quiet window: at `0`, the next start.
 - A handler doing table scans should hand off to a background task and return;
   core does not await subscribers.
 
-Subscriptions are torn down and re-established across the handshake rebuild, so
-the provider instance must be reset on reconfiguration or handlers accumulate.
+Core builds one provider instance per load and republishes that same instance on
+every handshake rebuild, so a subscription made through it survives the rebuild.
+What stops a module subscribing twice is `RanksModuleBase.Register`'s guard
+(FR-API-08); a core reload builds a new instance holding none of the old
+subscriptions, which is why a module rebuilds itself against it.
 
 #### Event payloads
 
@@ -1892,6 +1982,12 @@ sealed class RanksPointsChangingArgs
 }
 ```
 
+**`PointsChanged` reports a change, with one exception.** Core's `!setpoints`
+naming the total a player already has raises it with `OldPoints` equal to
+`NewPoints` and `Delta` 0 (FR-CMD-03): a rating module takes an admin's set into
+its rating from this event, and another plugin's points may have moved the total
+off that rating. Nothing else reports an unchanged total.
+
 **`PointsChanging` is the inversion of the deleted `RegisterMultiplier` hook**
 (FR-PTS-04), and the context it carries is deliberately the same shape: an
 `EventKey` and a `CounterpartySteamId`, because a contribution is usually
@@ -1907,8 +2003,8 @@ event-specific rather than player-specific.
   third party silently rescale another module's deliberate award would
   reintroduce exactly the two-writers problem that rule exists to prevent. A
   module wanting a double-XP weekend calls `AddPoints` with its own number.
-- It therefore never fires when `UseCoreRankingLogic` is `false`, because core
-  awards nothing in that mode.
+- It therefore never fires when `UseCoreRankingLogic` is `false` or a module holds
+  the scoring claim, because core awards nothing then.
 
 > Modules must **not** register game-event hooks (`Core.GameEvent.HookPost<T>`)
 > from `UseSharedInterface` / `OnSharedInterfaceInjected` — those run once per
@@ -1918,7 +2014,7 @@ event-specific rather than player-specific.
 ### FR-API-05 — Gate state and core point settings
 
 ```csharp
-bool ArePointsEnabled { get; }          // every gate currently satisfied
+bool ArePointsEnabled { get; }          // core scoring (switch on, no claim) and every gate satisfied
 bool IsPlayCounted { get; }             // MinPlayers met, no excluded warmup, no bots-only team
 RanksPointSettings GetPointSettings();  // a snapshot of core's point-related config
 ```
@@ -1929,7 +2025,8 @@ tracks live config reloads (NFR-08) rather than pinning values at load.
 `IsPlayCounted` is the server-wide half of FR-PTS-03. It ignores
 `UseCoreRankingLogic`, and a single interaction with a bot is left to the caller
 to judge with `BotsEnabled`, because that is a property of each event. While it is
-`false` core records nothing but playtime, so a module counting or rating the same
+`false` core awards no points of its own and records no counter but playtime — a
+module's `AddPoints` and `SetPoints` still land — so a module counting or rating the same
 play asks it per event. Core decides it once per server tick, so the module gets exactly the
 answer core used for that event, and asking is cheap even from `weapon_fire`. It
 is a later addition, so a module calling it against an older core gets a
@@ -1965,9 +2062,12 @@ server's VIP multiplier reads `VipMultiplier` and folds it into its own formula
 the thing applying it.
 
 **Readable in both modes.** The values remain accurate and meaningful with
-`UseCoreRankingLogic` set to `false`, where core applies none of them itself
-(FR-PTS-00). A module reading them is reading the operator's intent, not core's
-behaviour.
+`UseCoreRankingLogic` set to `false`, or while a module holds the scoring claim,
+where core applies none of them itself (FR-PTS-00). A module reading them is
+reading the operator's intent, not core's behaviour. That includes
+`UseCoreRankingLogic` itself: the snapshot carries the configured value, which a
+claim overrides without rewriting, and whether core is scoring is
+`ArePointsEnabled` and `ScoringOwner` (FR-API-14).
 
 Read-only by construction — there is no setter. Core owns its config; a module
 that wants different numbers ships its own.
@@ -1992,12 +2092,14 @@ shared ledger was rejected, and why ownership sits with core.
 > **Call it from the handshake, not from `Load`.** A module's `Load()` runs
 > *before* `UseSharedInterface`, so it has no `IRanksApi` yet — registering
 > there is impossible, and that is precisely the contradiction core-owned
-> runners remove. Register where the API arrives; core migrates every
-> registered-but-not-yet-migrated assembly in `OnAllPluginsLoaded`.
+> runners remove. Register where the API arrives; at server start core migrates
+> every registered-but-not-yet-migrated assembly in `OnAllPluginsLoaded`, and
+> after that it migrates one in the background, starting as the call that
+> registers it returns (FR-DB-05).
 >
 > **The handshake re-runs on every plugin load and unload**, so
 > `RegisterMigrations` must be idempotent: core dedupes on
-> `(assembly, pluginId)` and migrates each exactly once per process.
+> `(assembly, pluginId)` and migrates each once per load of core.
 
 `Assembly` is a BCL type and FluentMigrator — not `Ranks` — invokes the
 migration classes, so core still names no module type and the dependency rule
@@ -2020,6 +2122,11 @@ public sealed record RanksDisplayOverride(
 Session-only, never persisted, cleared on disconnect. The player's real points,
 stats and database row are untouched. Supports prestige and event/seasonal
 plugins that want to display a different ladder.
+
+Like the point writes (FR-API-02), `SetDisplayOverride` and `ClearDisplayOverride`
+apply at once on the game thread and, called from another thread, on its next
+tick — only while the player still holds their slot. A module's config reload or
+`Unload` can run on a pool thread, and the overlay ends in a controller write.
 
 **Every display surface core owns resolves from the overlay** — the clan tag, the
 rank icon, the mode it is drawn in, and the synced score. This is the whole
@@ -2047,8 +2154,9 @@ A module consuming the API must treat it as a **soft dependency**:
   on a miss, so a single assignment covers both outcomes. Never early-return: an
   early return leaves a stale reference pointing at a disposed provider.
 - Report absence from `OnAllPluginsLoaded`, not from the binder. The binder runs
-  on every rebuild and would spam; `OnAllPluginsLoaded` runs once per load cycle
-  and is the only point where field state is authoritative.
+  on every rebuild and would spam; `OnAllPluginsLoaded` runs once, at server
+  start — a hot load or reload never reaches it — and is the only point where
+  field state is authoritative.
 - Because the contract DLL may genuinely be absent, the acquisition path must be
   split so that no method the JIT compiles can reference the contract type until
   a method the caller can guard is entered. The JIT resolves type references at
@@ -2091,7 +2199,7 @@ public abstract class RanksModuleBase
     /// Hands this module's migrations to core, which owns the runner (FR-DB-05).
     protected void RegisterMigrations(Assembly assembly) => Api.RegisterMigrations(assembly, ModuleId);
 
-    // Core lifecycle, all no-ops until overridden. Every one is raised on the game thread.
+    // Core lifecycle, all no-ops until overridden. All but OnCoreReady are raised on the game thread.
     protected virtual void OnCoreReady() { }
     protected virtual void OnPlayerDataLoaded(RanksPlayerSnapshot player) { }
     protected virtual void OnPlayerDataSaved(RanksPlayerSnapshot player) { }
@@ -2101,7 +2209,7 @@ public abstract class RanksModuleBase
     protected virtual void OnPlayersPurged(IReadOnlyList<ulong> steamIds) { }
     protected virtual void OnMaintenanceDue() { }
 
-    public void Register();     // idempotent — from Load
+    public void Register();     // idempotent — from the handshake
     public void Unregister();   // idempotent — from Unload
 }
 ```
@@ -2111,8 +2219,11 @@ Four semantics are part of the contract, not implementation detail:
 1. **Handlers carry `RanksPlayerSnapshot`, not a bare `ulong`.** They mirror
    FR-API-04's payloads exactly. A SteamID alone would force every module to
    call back into the API for data core had already materialised.
-2. **Every handler is raised on the game thread** (FR-API-04), so an override
-   may touch players and entities without a scheduler hop.
+2. **Every handler but `OnCoreReady` is raised on the game thread** (FR-API-04),
+   so an override may touch players and entities without a scheduler hop.
+   `Register()` raises `OnCoreReady` on the thread that calls it — the
+   handshake's, which SwiftlyS2's file watcher runs on a pool thread — so an
+   override that touches players goes through `Core.Scheduler.NextTick`.
 3. **`Register()` and `Unregister()` are idempotent.** The handshake re-runs on
    every plugin load *and unload*, so modules call `Register()` repeatedly;
    without the guard that is one duplicate subscription per rebuild, which is
@@ -2134,16 +2245,18 @@ Four semantics are part of the contract, not implementation detail:
 
 Each member earns its place against a real module: the three database members
 serve WeaponStats, CustomCombos and the rating modules; `OnPointsChanged` serves
-Prestige, whose overlay is derived from the total; `OnRankChanged` is the one with
-no module left behind it — RevealAllRanks was absorbed into core (FR-SCB-04) — and
-stays because the contract is additive-only and a tier crossing is the obvious
-thing a display module hangs off; `OnPlayersPurged` is what stops a module's
-tables orphaning rows when FR-DB-08 purges core's; `OnMaintenanceDue` serves any
-module with bulk work of its own, which needs core's quiet window rather than a
-check of its own. `OnPeriodChanged` and `OnPlayerReset` (FR-API-13) serve every
-official module: the counting ones stamp and clear their per-period figures,
-EloPoints drops the rating core just reset, and Prestige redraws an overlay whose
-points moved without an award.
+Prestige, whose overlay is derived from the total, and EloPoints, which takes an
+admin's change into its rating; `OnRankChanged` is the one with no module left
+behind it — RevealAllRanks was absorbed into core (FR-SCB-04) — and stays
+because the contract is additive-only and a tier crossing is the obvious thing a
+display module hangs off; `OnPlayersPurged` is what stops a module's tables
+orphaning rows when FR-DB-08 purges core's; `OnMaintenanceDue` serves any module
+with bulk work of its own, which needs core's quiet window rather than a check
+of its own — WeaponStats and CustomCombos run their orphan sweeps from it.
+`OnPeriodChanged` and `OnPlayerReset` (FR-API-13) serve every official module:
+the counting ones stamp and clear their per-period figures, EloPoints drops the
+rating core just reset, and Prestige redraws an overlay whose points moved
+without an award.
 
 **What is deliberately absent:** any per-player toggle state, an `AddPoints`
 wrapper (call `Api.AddPoints`), and any scoring hook — a module hooks its own
@@ -2189,9 +2302,12 @@ bool IsCoreReady { get; }
 event Action CoreReady;      // fires once per load cycle, after config + schema are up
 ```
 
-The shared interface is registered in `ConfigureSharedInterface`, which runs
-**before** core's schema check and first config read have finished. A module
-binding in `UseSharedInterface` can therefore hold a live `IRanksApi` whose
+Core binds its configuration, runs the schema probe and marks itself ready
+inside `Load`, which SwiftlyS2 runs **before** `ConfigureSharedInterface`
+publishes the interface — so by the time a module can bind, `IsCoreReady` is
+already `true`. That order is core's implementation, not part of the contract,
+and the pair exists so no module depends on it. A module that did would,
+against a core that settled after publishing, hold a live `IRanksApi` whose
 settings are still defaults and whose tables may not exist yet — and
 `GetPointSettings` would answer confidently with the wrong numbers.
 
@@ -2208,8 +2324,11 @@ else                 api.CoreReady += OnRanksReady;
 - A module that subscribes after the event has already fired must still be
   served, hence the `IsCoreReady` check first. Racing it the other way round is
   the bug this pair exists to prevent.
-- Handlers are cleared on unload. Subscribing from the handshake rather than
-  `Load` would otherwise accumulate one per rebuild (FR-API-04).
+- Core clears every handler when it unloads, so the instance a module still holds
+  until its next handshake keeps none of the module's handlers, and nothing core
+  still has in flight can reach one. Duplicates are prevented elsewhere: the
+  handshake rebuild never unloads core, and `RanksModuleBase.Register`'s guard
+  keeps a module from subscribing twice (FR-API-08).
 
 Adopted from VIPCore, which ships the same pair for the same reason — its core
 loads its database asynchronously and every one of its modules gates
@@ -2235,8 +2354,10 @@ void SetKillArbiter(IRanksKillArbiter? arbiter);
 Core consults the registered arbiter inside its kill award path, passing the
 attribute set it has already computed, and awards any returned claim **through its
 own pipeline**. Exists for `Ranks_CustomCombos` (FR-MOD-06); at most one arbiter is
-registered at a time, the same operator constraint as the absolute authority rule
-(FR-PTS-00).
+registered at a time, the same single-authority rule as absolute scoring
+(FR-PTS-00). While a rating module holds the scoring claim (FR-API-14) core still
+consults the arbiter for every death it counts, so the arbiter's own counts keep
+moving, but pays nothing it claims.
 
 **Core asks before it awards, and that ordering is the whole point.** A module
 hooking `player_death` separately cannot stop core awarding, and plugin ordering is
@@ -2344,6 +2465,50 @@ own. Core is the only clock (FR-DB-10), so these are the whole interface to it.
   `OnPeriodChanged` and `OnPlayerReset`, subscribed by the same idempotent
   `Register()`.
 
+### FR-API-14 — Scoring claim
+
+```csharp
+bool    ClaimScoring(string moduleId);    // true for the holder, again on every call; false while another holds it or moduleId is blank
+void    ReleaseScoring(string moduleId);  // a no-op unless moduleId holds the claim
+string? ScoringOwner { get; }             // the holder, or null while core's own switch decides
+```
+
+How a rating module (FR-MOD-05) takes scoring from core with one call, so an
+operator who installs it does not also have to find and flip
+`Rank.UseCoreRankingLogic`. Leaving the switch on was the one misconfiguration that
+silently produced nonsense: core kept awarding per kill while the module wrote its
+rating over the top, and neither number meant anything.
+
+- **While a module holds the claim, core awards no points of its own**, whatever
+  `UseCoreRankingLogic` says: every handler, gate, multiplier and arbiter claim
+  behaves as with the switch off (FR-PTS-00), and `ArePointsEnabled` answers
+  `false`. `AddPoints` and `SetPoints` stay raw and open to everyone, so admin
+  commands and other plugins still write.
+- **The operator's file is never rewritten.** `GetPointSettings` keeps reporting the
+  configured value; `ScoringOwner` and `ArePointsEnabled` say whether core is
+  scoring. A claim granted over a `true` setting logs one `Warning` naming the
+  module, and with the setting `false` core's startup warning (FR-PTS-00) stays
+  quiet while a module holds the claim.
+- **One holder.** The holder claiming again gets `true` and nothing is logged, so a
+  module claims from every handshake. Another module gets `false`, and core logs one
+  `Error` naming both — once per claimant, since the handshake repeats on every
+  plugin load and unload. A blank `moduleId` always gets `false`. Module ids
+  compare case-insensitively.
+- **A claim lives on the API instance.** A core reload builds a new one that holds
+  no claim, and the module's next handshake claims again — which is why a module
+  claims through the interface that handshake bound, not one it kept from an
+  earlier one. `ReleaseScoring` in `Unload` hands scoring back to the switch; a
+  claim nobody releases keeps core silent until core itself reloads.
+- **Additive like every member after 1.0** (FR-API-01). Against an older core the
+  call is a `MissingMethodException` at JIT; keep it in its own `NoInlining` method,
+  catch it at the call site, and fall back to warning the operator about the
+  switch.
+
+**Why this does not invert the dependency.** Core holds the module's id — a string
+it logs and compares — and nothing the module supplied that it could call. It
+never invokes module code, and an unloaded module leaves at worst that string
+behind. That is the line FR-CMD-04 draws, without even the delegate.
+
 ---
 
 ## 12. Non-functional requirements
@@ -2353,8 +2518,8 @@ own. Core is the only clock (FR-DB-10), so these are the whole interface to it.
 | **NFR-01** | No database I/O on the game thread. All queries run off-thread; results marshal back via the scheduler. |
 | **NFR-02** | Per-player state is resolved from a **slot-indexed array** on hot paths (kill / hurt / movement), not a dictionary and not a `ConditionalWeakTable`. Measured at 2.8–3.3 ns/op against 13.2 for `ConcurrentDictionary` and 17.7–19.1 for CWT — see the design note below. |
 | **NFR-03** | The plugin constructor stays empty. `base.Core` is not safely usable there — the plugin manager activates the type before wiring DI, config and logging. Everything that touches `Core.*` runs in `Load`. |
-| **NFR-04** | `Core.Engine.GlobalVars` is never read synchronously from `Load`; it throws when the engine is not yet up, which aborts plugin loading. |
-| **NFR-05** | Hot reload is supported: `Load(hotReload: true)` re-adopts already-connected players rather than starting empty. |
+| **NFR-04** | `Core.Engine.GlobalVars` is never read unguarded from `Load`; it throws when the engine is not yet up, which aborts plugin loading. The one read `Load` makes is a `try`/`catch` probe for whether a map is up (FR-DB-09). |
+| **NFR-05** | Loading into a running server is supported, however it is reached — `Load(hotReload: true)` or SwiftlyS2's plugin API, which passes `false` — and re-adopts already-connected players rather than starting empty. |
 | **NFR-06** | A module failing, throwing or being absent must never prevent core scoring. All module-facing callbacks are individually guarded. |
 | **NFR-07** | Schema creation and migration run through FluentMigrator (FR-DB-05), guard each object individually, and produce the same logical schema on all three engines. Verified end-to-end per engine against both a fresh and an existing database — a migration that no-ops because of a mismatched database identifier records as applied having done nothing, with no error to notice. |
 | **NFR-08** | Config reload (`reloadOnChange: true`) applies point values, rank thresholds and display toggles without a restart. **Reload is scoped to the file that changed** — saving `points.jsonc` must not re-apply, re-validate or re-warn about `ranks.jsonc`. Connection name, table prefix and table suffix require a restart and must say so in the config comments. |
@@ -2479,7 +2644,7 @@ The reasoning lives in the requirement each row points to; this is the index.
 | **Q10** | Should combos suppress the base award? | **Reversed 2026-10.** Was additive-only, because an additive module cannot retract what core already multiplied. That held only while the module saw the kill after core; FR-API-11 has core ask first, so nothing is retracted. Now opt-in via `SuppressCoreAwards`, and `Count > 1` may not use it. | FR-MOD-06, FR-API-11 |
 | **Q11** | Combos in config, or API-only? | Neither — combos left core entirely. | FR-MOD-06 |
 | **Q12** | Percentile rank thresholds? | Fixed thresholds only. Saturation documented rather than engineered around. | FR-RNK-01 |
-| **Q13** | Does `UseCoreRankingLogic = false` suppress third-party scoring? | No. Contention is an operator constraint, not core machinery. | FR-PTS-00 |
+| **Q13** | Does `UseCoreRankingLogic = false` suppress third-party scoring? | No — `AddPoints` and `SetPoints` stay raw in every mode. **Revised 2026-11:** contention between rating modules is core machinery after all, as a scoring claim that stops core's own awards and refuses a second claimant; a plugin that never claims is still the operator's to keep out. | FR-PTS-00, FR-API-14 |
 | **Q14** | Per-session counters alongside lifetime? | No. CS2's own scoreboard already shows per-map combat stats. | — |
 | **Q15** | `points` as `INT` or `DECIMAL`? | `INT`. Rating modules own their own precision. | FR-MOD-05 |
 | **Q16** | May a module contribute entries to core's menu? | **Reversed 2026-10.** Was no, on dependency-inversion grounds. Core holds a delegate and a string, both declared in `Ranks.Contract`, so it names no module type — the objection did not survive the actual shape. Modules now register a menu factory core nests. | FR-CMD-04 |

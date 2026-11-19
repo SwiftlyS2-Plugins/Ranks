@@ -212,7 +212,10 @@ closed before that, and **Before seasons**, open empty here; those figures are p
 statistics too. With seasons off they delete the player's all-time rows. With seasons on
 they take the current season's figures off the all-time totals and delete that season's
 rows; past seasons stay, as they do in core. A purge removes everything the player has,
-all time and every season.
+all time and every season. A reset or purge that fails is retried with the next write;
+one the database refuses three times is dropped, with an error in the log. Connection
+failures, deadlocks, lock waits and timeouts that the database driver reports as transient
+never count toward the three.
 
 **Reading**
 
@@ -281,4 +284,6 @@ dense range — `0` through `11` with a hole at `9`.
 | No tables created | Core could not reach the database | Check core's connection name and the startup log |
 | A past season shows no weapon stats | It closed before this module's 1.1.0 was installed, or it is **Before seasons** | Expected; those figures are under **All time** |
 | Log: "this Ranks version has no seasons" | Ranks is older than 1.1.0 | Update Ranks. Until then weapon stats work as in 1.0.2: all time only, and resets do not clear them |
+| Rows with `steam_id` `0` in the weapon tables | A release before 1.1.4, with SwiftlyS2's strict Steam authorization, filed late-confirmed players there | Update; the next server start removes them |
+| Error "gave up resetting the weapon statistics" or "gave up deleting the weapon statistics" | The database refused the delete three times: no `DELETE` permission, or a `_period` table is missing, which a purge needs even with seasons off | Fix what the error names. The dropped reset is not retried, so reset the player again; purged players' rows go at the next server start |
 | `!hitstats` does nothing | It does not exist | Hitgroup totals are API-only; see the note under Commands |
